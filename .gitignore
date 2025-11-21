@@ -10,6 +10,14 @@
 *.userosscache
 *.sln.docstates
 
+# Ignorar ficheiros de base de dados SQL Server
+*.mdf
+*.ldf
+*.ndf
+
+# Ignorar a pasta de dados (opcional, mas recomendado)
+App_Data/
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
