@@ -1,23 +1,24 @@
 ﻿using System;
 using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace SOMIOD_API.Models
 {
     public class ContentInstance
     {
-        [JsonPropertyName("resource-name")]
+        [JsonProperty("resource-name")]
         public string ResourceName { get; set; }
 
-        [JsonPropertyName("res-type")]
+        [JsonProperty("res-type")]
         public string ResType { get; set; } = "content-instance";
 
-        [JsonPropertyName("content-type")]
+        [JsonProperty("content-type")]
         public string ContentType { get; set; }
 
-        [JsonPropertyName("content")]
+        [JsonProperty("content")]
         public string Content { get; set; }
 
-        [JsonPropertyName("creation-datetime")]
+        [JsonProperty("creation-datetime")]
         public DateTimeOffset? CreationDateTime { get; set; }
     }
 }

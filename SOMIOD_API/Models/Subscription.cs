@@ -1,23 +1,24 @@
 ﻿using System;
 using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace SOMIOD_API.Models
 {
     public class Subscription
     {
-        [JsonPropertyName("resource-name")]
+        [JsonProperty("resource-name")]
         public string ResourceName { get; set; }
 
-        [JsonPropertyName("res-type")]
+        [JsonProperty("res-type")]
         public string ResType { get; set; } = "subscription";
 
-        [JsonPropertyName("evt")]
+        [JsonProperty("evt")]
         public int Evt { get; set; } // 1 = Creation, 2 = Deletion
 
-        [JsonPropertyName("endpoint")]
+        [JsonProperty("endpoint")]
         public string Endpoint { get; set; }
 
-        [JsonPropertyName("creation-datetime")]
+        [JsonProperty("creation-datetime")]
         public DateTimeOffset? CreationDateTime { get; set; }
     }
 }
