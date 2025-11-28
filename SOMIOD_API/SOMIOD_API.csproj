@@ -217,6 +217,12 @@
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>
     <Compile Include="Models\Application.cs" />
+<<<<<<< HEAD
+=======
+    <Compile Include="Models\Container.cs" />
+    <Compile Include="Models\ContentInstance.cs" />
+    <Compile Include="Models\Subscription.cs" />
+>>>>>>> 9f75797899fa44ef57d1bfb86da5b302209a21d0
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -228,7 +234,13 @@
       <DependentUpon>Web.config</DependentUpon>
     </None>
   </ItemGroup>
+<<<<<<< HEAD
   <ItemGroup />
+=======
+  <ItemGroup>
+    <Folder Include="Controllers\" />
+  </ItemGroup>
+>>>>>>> 9f75797899fa44ef57d1bfb86da5b302209a21d0
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
