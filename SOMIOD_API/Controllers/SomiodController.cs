@@ -16,7 +16,7 @@ namespace SOMIOD_API.Controllers
         [HttpPost]
         public IHttpActionResult CreateApplication([FromBody] Application app)
         {
-            if (app.ResType != "application") return BadRequest("ResType deve ser 'application'");
+            if (app.ResType != "application") return BadRequest("res-type deve ser 'application'");
 
             // TODO
 
