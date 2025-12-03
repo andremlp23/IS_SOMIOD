@@ -1,14 +1,19 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Threading.Tasks; // Necessário para o Task.Delay (animação do semáforo)
+using System.Threading.Tasks;
 using System.Windows.Forms;
+// Adicionar estas referências:
+using RestSharp;
 
 namespace IS_SOMIOD
 {
     public partial class Form1 : Form
     {
+        // --- CONFIGURAÇÕES DA API SOMIOD ---
+        private const string API_BASE = "http://localhost:62056/api/somiod";
+        private const string APP_NAME = "smart-parking";
+
         // Variável para guardar qual o botão (Vaga X) que está à espera de sair
         private Button slotParaSair = null;
 
@@ -16,17 +21,21 @@ namespace IS_SOMIOD
         {
             InitializeComponent();
 
-            // Ligar os eventos manualmente (caso o Designer falhe)
+            // Ligar os eventos manualmente
             this.btnMais1.Click += new EventHandler(this.btnMais1_Click);
             this.btnMenos1.Click += new EventHandler(this.btnMenos1_Click);
 
-            // Iniciar cores
             InitializeDefaultColors();
+        }
+
+        private async void Form1_Load(object sender, EventArgs e)
+        {
+            // [API] Criar a estrutura base (Application e Containers) ao iniciar
+            await CriarRecursosIniciais();
         }
 
         private void InitializeDefaultColors()
         {
-            // Resetar todos os botões de vagas para VERDE (Livres)
             var allSlots = new[] { btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8 };
             foreach (var b in allSlots)
             {
@@ -34,14 +43,75 @@ namespace IS_SOMIOD
                 b.BackColor = Color.LightGreen;
             }
 
-            // Semáforo desligado (Cinza)
+            // Semáforo inicia livre (Verde claro na sua lógica inicial)
             btnSemaforo.BackColor = Color.LightGreen;
 
-            // Botão de saída reset
             btnMenos1.UseVisualStyleBackColor = true;
             btnMenos1.BackColor = SystemColors.Control;
 
             slotParaSair = null;
+        }
+
+        // --- LÓGICA DE BOOTSTRAP API ---
+        // --- LÓGICA DE BOOTSTRAP (CORRIGIDA) ---
+        private async Task CriarRecursosIniciais()
+        {
+            var client = new RestClient(API_BASE);
+
+            // 1. Tentar criar a Aplicação
+            var reqApp = new RestRequest("", Method.Post);
+            reqApp.AddJsonBody(new { res_type = "application", resource_name = APP_NAME });
+
+            var respApp = await client.ExecuteAsync(reqApp);
+
+            // Se falhou e não foi por conflito (já existe), mostramos erro na consola
+            if (!respApp.IsSuccessful)
+            {
+                System.Diagnostics.Debug.WriteLine($"Nota: App '{APP_NAME}' talvez já exista. Status: {respApp.StatusCode}");
+            }
+
+            // 2. Tentar criar Containers (zona-descarga, zona-y, semaforo)
+            string[] containers = { "zona-descarga", "zona-y", "semaforo" };
+            foreach (var cont in containers)
+            {
+                var reqCont = new RestRequest(APP_NAME, Method.Post);
+                reqCont.AddJsonBody(new { res_type = "container", resource_name = cont });
+
+                var respCont = await client.ExecuteAsync(reqCont);
+
+                if (!respCont.IsSuccessful)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Nota: Container '{cont}' talvez já exista. Status: {respCont.StatusCode}");
+                }
+            }
+        }
+
+        // --- HELPER: ENVIAR PARA API ---
+        private async Task EnviarDadosAPI(string container, string conteudo)
+        {
+            try
+            {
+                var client = new RestClient(API_BASE);
+                var request = new RestRequest($"{APP_NAME}/{container}", Method.Post);
+
+                request.AddHeader("content-type", "application/json");
+
+                var body = new
+                {
+                    res_type = "content-instance",
+                    resource_name = $"evt-{DateTime.Now.Ticks}",
+                    content = conteudo,
+                    content_type = "text/plain"
+                };
+
+                request.AddJsonBody(body);
+                await client.ExecuteAsync(request);
+            }
+            catch (Exception ex)
+            {
+                // Log de erro silencioso para não parar a simulação
+                System.Diagnostics.Debug.WriteLine("Erro API: " + ex.Message);
+            }
         }
 
         // --- EVENTOS DE CLIQUE NAS VAGAS X (5 a 8) ---
@@ -50,28 +120,34 @@ namespace IS_SOMIOD
         private void btn7_Click(object sender, EventArgs e) { HandleSlotClick(btn7); }
         private void btn8_Click(object sender, EventArgs e) { HandleSlotClick(btn8); }
 
-        // Lógica ao clicar numa vaga X (Zona de Descarga)
         private void HandleSlotClick(Button slot)
         {
-            // Só podemos sair se a vaga estiver Ocupada (Red)
+            // Só seleciona se estiver Ocupada (IndianRed)
             if (slot.BackColor == Color.IndianRed)
             {
-                // Se já havia outro selecionado, limpa a seleção anterior
                 if (slotParaSair != null && slotParaSair != slot)
                 {
-                    slotParaSair.BackColor = Color.IndianRed; // Volta a ocupado
+                    slotParaSair.BackColor = Color.IndianRed;
                 }
 
-                // Marca este slot como "Pronto a Sair" (Amarelo)
+                // Marca como "Pronto a Sair"
                 slot.BackColor = Color.Yellow;
-                btnSemaforo.BackColor = Color.Yellow;
+                btnSemaforo.BackColor = Color.Yellow; // Indicação visual de operação
                 slotParaSair = slot;
 
+                // Ativa botão de saída
+                btnMenos1.BackColor = Color.Yellow;
             }
-            // Se clicar de novo num amarelo, cancela a saída
+            // Cancelar seleção
             else if (slot.BackColor == Color.Yellow)
             {
                 slot.BackColor = Color.IndianRed;
+
+                // Restaura estado do semáforo baseado na ocupação
+                var vagasX = new[] { btn5, btn6, btn7, btn8 };
+                bool full = vagasX.Count(b => b.BackColor == Color.IndianRed) >= 3; // Lógica simplificada
+                btnSemaforo.BackColor = full ? Color.IndianRed : Color.LightGreen;
+
                 slotParaSair = null;
                 btnMenos1.UseVisualStyleBackColor = true;
                 btnMenos1.BackColor = SystemColors.Control;
@@ -79,107 +155,108 @@ namespace IS_SOMIOD
         }
 
         // --- ENTRADA DE CAMIÕES (+1) ---
-        private void btnMais1_Click(object sender, EventArgs e)
+        private async void btnMais1_Click(object sender, EventArgs e)
         {
-            // REQUISITO: Primeiro preencher Zona X (5-8)
+            // 1. ZONA X (5-8)
             var vagasX = new[] { btn5, btn6, btn7, btn8 };
             var primeiraLivreX = vagasX.FirstOrDefault(b => b.BackColor == Color.LightGreen);
 
             if (primeiraLivreX != null)
             {
-                primeiraLivreX.BackColor = Color.IndianRed; // Ocupa X
+                primeiraLivreX.BackColor = Color.IndianRed;
 
-                // Se após ocupar todas as vagas X estiverem vermelhas, liga semáforo vermelho
+                // [API] Avisar SOMIOD que entrou em X
+                await EnviarDadosAPI("zona-descarga", $"ocupado-{primeiraLivreX.Name}");
+
+                // Atualizar Semáforo se encheu
                 if (vagasX.All(b => b.BackColor == Color.IndianRed))
                 {
-                    btnSemaforo.UseVisualStyleBackColor = false;
                     btnSemaforo.BackColor = Color.IndianRed;
+                    // [API] Avisar que semáforo fechou
+                    await EnviarDadosAPI("semaforo", "<cmd>VERMELHO</cmd>");
                 }
-
                 return;
             }
 
-            // REQUISITO: Só depois preencher Zona Y (1-4)
+            // 2. ZONA Y (1-4)
             var vagasY = new[] { btn1, btn2, btn3, btn4 };
             var primeiraLivreY = vagasY.FirstOrDefault(b => b.BackColor == Color.LightGreen);
 
             if (primeiraLivreY != null)
             {
-                primeiraLivreY.BackColor = Color.IndianRed; // Ocupa Y
+                primeiraLivreY.BackColor = Color.IndianRed;
 
-                // Também verificar se, por alguma razão, todas as X estão agora vermelhas
+                // [API] Avisar SOMIOD que entrou na fila Y
+                await EnviarDadosAPI("zona-y", $"ocupado-fila-{primeiraLivreY.Name}");
+
                 if (vagasX.All(b => b.BackColor == Color.IndianRed))
                 {
-                    btnSemaforo.UseVisualStyleBackColor = false;
                     btnSemaforo.BackColor = Color.IndianRed;
                 }
-
                 return;
             }
 
-            // Se chegou aqui, está tudo cheio!
             MessageBox.Show("Parque Completo!");
         }
 
         // --- SAÍDA DE CAMIÕES (-1) ---
         private async void btnMenos1_Click(object sender, EventArgs e)
         {
-            // Só funciona se tivermos selecionado uma vaga X (Amarela)
             if (slotParaSair == null) return;
 
-            // 1. O camião sai da vaga X (Fica VERDE / Livre)
+            // 1. O camião sai da vaga X
             slotParaSair.BackColor = Color.LightGreen;
 
-            // Reset visual do botão Menos1
+            // [API] Avisar SOMIOD que vaga X libertou
+            await EnviarDadosAPI("zona-descarga", $"livre-{slotParaSair.Name}");
+
             btnMenos1.UseVisualStyleBackColor = true;
             btnMenos1.BackColor = SystemColors.Control;
 
-            // 2. Verificar se há alguém na Fila de Espera (Zona Y - 1 a 4)
-            // Procuramos um botão VERMELHO na zona Y
+            // 2. Verificar Fila Y
             var vagasY = new[] { btn1, btn2, btn3, btn4 };
             var camiaoEmEspera = vagasY.FirstOrDefault(b => b.BackColor == Color.IndianRed);
 
             if (camiaoEmEspera != null)
             {
-                // REQUISITO: Semáforo VERDE para autorizar passagem
-                btnSemaforo.UseVisualStyleBackColor = false;
+                // [API] Semáforo VERDE (Pub)
+                await EnviarDadosAPI("semaforo", "<cmd>VERDE</cmd>");
+
                 btnSemaforo.BackColor = Color.LightGreen;
+                await Task.Delay(1000); // Simulação visual
 
-                // Pequena pausa para simular o movimento (opcional, mas fica melhor visualmente)
-                await Task.Delay(1000);
-
-                // Lógica de Movimento:
-                // a) Camião sai de Y (Fica Verde)
+                // a) Sai de Y
                 camiaoEmEspera.BackColor = Color.LightGreen;
+                // [API] Saiu da fila
+                await EnviarDadosAPI("zona-y", $"saiu-fila-{camiaoEmEspera.Name}");
 
-                // b) Camião entra em X (A vaga que libertámos volta a ficar Vermelha)
+                // b) Entra em X
                 slotParaSair.BackColor = Color.IndianRed;
+                // [API] Ocupou X
+                await EnviarDadosAPI("zona-descarga", $"ocupado-{slotParaSair.Name}");
 
-                // c) Semáforo fecha
+                // c) Atualizar Semáforo
                 var vagasX = new[] { btn5, btn6, btn7, btn8 };
-                var primeiraLivreX = vagasX.FirstOrDefault(b => b.BackColor == Color.LightGreen);
-                    // Se após ocupar todas as vagas X estiverem vermelhas, liga semáforo vermelho
-                    if (vagasX.All(b => b.BackColor == Color.IndianRed))
-                    {
-                        btnSemaforo.UseVisualStyleBackColor = false;
-                        btnSemaforo.BackColor = Color.IndianRed;
-                    }
+                if (vagasX.All(b => b.BackColor == Color.IndianRed))
+                {
+                    btnSemaforo.BackColor = Color.IndianRed;
+                    // [API] Semáforo VERMELHO
+                    await EnviarDadosAPI("semaforo", "<cmd>VERMELHO</cmd>");
+                }
                 else
                 {
                     btnSemaforo.BackColor = Color.LightGreen;
+                    await EnviarDadosAPI("semaforo", "<cmd>VERDE</cmd>");
                 }
 
+                slotParaSair = null;
                 return;
-                
             }
-            btnSemaforo.BackColor = Color.LightGreen;
-            // Limpa a variável de seleção
-            slotParaSair = null;
-        }
 
-        private void Form1_Load(object sender, EventArgs e)
-        {
-            // Vazio
+            // Se não havia ninguém na fila, o semáforo fica verde (livre) e limpamos seleção
+            btnSemaforo.BackColor = Color.LightGreen;
+            await EnviarDadosAPI("semaforo", "<cmd>VERDE</cmd>"); // Garante estado correto
+            slotParaSair = null;
         }
     }
 }
