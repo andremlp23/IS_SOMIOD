@@ -1,83 +1,185 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Threading.Tasks; // Necessário para o Task.Delay (animação do semáforo)
 using System.Windows.Forms;
 
 namespace IS_SOMIOD
 {
     public partial class Form1 : Form
     {
+        // Variável para guardar qual o botão (Vaga X) que está à espera de sair
+        private Button slotParaSair = null;
+
         public Form1()
         {
             InitializeComponent();
 
-            // Wire the +1 button click here so the handler is definitely attached
+            // Ligar os eventos manualmente (caso o Designer falhe)
             this.btnMais1.Click += new EventHandler(this.btnMais1_Click);
+            this.btnMenos1.Click += new EventHandler(this.btnMenos1_Click);
+
+            // Iniciar cores
+            InitializeDefaultColors();
         }
 
-
-        private void btn5_Click(object sender, EventArgs e)
+        private void InitializeDefaultColors()
         {
-            btn5.BackColor = Color.Red;
-            //Send estou ocupado to SOMIOD
+            // Resetar todos os botões de vagas para VERDE (Livres)
+            var allSlots = new[] { btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8 };
+            foreach (var b in allSlots)
+            {
+                b.UseVisualStyleBackColor = false;
+                b.BackColor = Color.LightGreen;
+            }
 
+            // Semáforo desligado (Cinza)
+            btnSemaforo.BackColor = Color.LightGreen;
+
+            // Botão de saída reset
+            btnMenos1.UseVisualStyleBackColor = true;
+            btnMenos1.BackColor = SystemColors.Control;
+
+            slotParaSair = null;
         }
 
-        private void btn6_Click(object sender, EventArgs e)
+        // --- EVENTOS DE CLIQUE NAS VAGAS X (5 a 8) ---
+        private void btn5_Click(object sender, EventArgs e) { HandleSlotClick(btn5); }
+        private void btn6_Click(object sender, EventArgs e) { HandleSlotClick(btn6); }
+        private void btn7_Click(object sender, EventArgs e) { HandleSlotClick(btn7); }
+        private void btn8_Click(object sender, EventArgs e) { HandleSlotClick(btn8); }
+
+        // Lógica ao clicar numa vaga X (Zona de Descarga)
+        private void HandleSlotClick(Button slot)
         {
-            btn6.BackColor = Color.Red;
-            //Send estou ocupado to SOMIOD
+            // Só podemos sair se a vaga estiver Ocupada (Red)
+            if (slot.BackColor == Color.IndianRed)
+            {
+                // Se já havia outro selecionado, limpa a seleção anterior
+                if (slotParaSair != null && slotParaSair != slot)
+                {
+                    slotParaSair.BackColor = Color.IndianRed; // Volta a ocupado
+                }
+
+                // Marca este slot como "Pronto a Sair" (Amarelo)
+                slot.BackColor = Color.Yellow;
+                btnSemaforo.BackColor = Color.Yellow;
+                slotParaSair = slot;
+
+            }
+            // Se clicar de novo num amarelo, cancela a saída
+            else if (slot.BackColor == Color.Yellow)
+            {
+                slot.BackColor = Color.IndianRed;
+                slotParaSair = null;
+                btnMenos1.UseVisualStyleBackColor = true;
+                btnMenos1.BackColor = SystemColors.Control;
+            }
         }
 
-        private void btn7_Click(object sender, EventArgs e)
-        {
-            btn7.BackColor = Color.Red;
-            //Send estou ocupado to SOMIOD
-        }
-
-        private void btn8_Click(object sender, EventArgs e)
-        {
-            btn8.BackColor = Color.Red;
-            //Send estou ocupado to SOMIOD
-        }
-
-        // Handler for the "+1" button (control name: btnMais1)
+        // --- ENTRADA DE CAMIÕES (+1) ---
         private void btnMais1_Click(object sender, EventArgs e)
         {
-            // Color to mark occupied
-            var occupiedColor = Color.Red;
+            // REQUISITO: Primeiro preencher Zona X (5-8)
+            var vagasX = new[] { btn5, btn6, btn7, btn8 };
+            var primeiraLivreX = vagasX.FirstOrDefault(b => b.BackColor == Color.LightGreen);
 
-            // Priority: try btn5..btn8 first — set first one with default color
-            if (IsDefaultBackColor(btn5)) { btn5.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn6)) { btn6.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn7)) { btn7.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn8)) { btn8.BackColor = occupiedColor; return; }
+            if (primeiraLivreX != null)
+            {
+                primeiraLivreX.BackColor = Color.IndianRed; // Ocupa X
 
-            // Else: try btn1..btn4 — set first one with default color
-            if (IsDefaultBackColor(btn1)) { btn1.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn2)) { btn2.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn3)) { btn3.BackColor = occupiedColor; return; }
-            if (IsDefaultBackColor(btn4)) { btn4.BackColor = occupiedColor; return; }
+                // Se após ocupar todas as vagas X estiverem vermelhas, liga semáforo vermelho
+                if (vagasX.All(b => b.BackColor == Color.IndianRed))
+                {
+                    btnSemaforo.UseVisualStyleBackColor = false;
+                    btnSemaforo.BackColor = Color.IndianRed;
+                }
 
-            // If none of 1..8 are available, mark the +1 button itself red
-            btnMais1.BackColor = occupiedColor;
+                return;
+            }
 
-            // Optionally: send "estou ocupado" to SOMIOD here
+            // REQUISITO: Só depois preencher Zona Y (1-4)
+            var vagasY = new[] { btn1, btn2, btn3, btn4 };
+            var primeiraLivreY = vagasY.FirstOrDefault(b => b.BackColor == Color.LightGreen);
+
+            if (primeiraLivreY != null)
+            {
+                primeiraLivreY.BackColor = Color.IndianRed; // Ocupa Y
+
+                // Também verificar se, por alguma razão, todas as X estão agora vermelhas
+                if (vagasX.All(b => b.BackColor == Color.IndianRed))
+                {
+                    btnSemaforo.UseVisualStyleBackColor = false;
+                    btnSemaforo.BackColor = Color.IndianRed;
+                }
+
+                return;
+            }
+
+            // Se chegou aqui, está tudo cheio!
+            MessageBox.Show("Parque Completo!");
         }
 
-        // Helper to decide if a button has the default WinForms background
-        private bool IsDefaultBackColor(Control c)
+        // --- SAÍDA DE CAMIÕES (-1) ---
+        private async void btnMenos1_Click(object sender, EventArgs e)
         {
-            // Consider common "default" cases: UseVisualStyleBackColor true, BackColor empty, or equals SystemColors.Control
-            var btn = c as Button;
-            if (btn != null && btn.UseVisualStyleBackColor) return true;
-            if (c.BackColor.IsEmpty) return true;
-            return c.BackColor.ToArgb() == SystemColors.Control.ToArgb();
+            // Só funciona se tivermos selecionado uma vaga X (Amarela)
+            if (slotParaSair == null) return;
+
+            // 1. O camião sai da vaga X (Fica VERDE / Livre)
+            slotParaSair.BackColor = Color.LightGreen;
+
+            // Reset visual do botão Menos1
+            btnMenos1.UseVisualStyleBackColor = true;
+            btnMenos1.BackColor = SystemColors.Control;
+
+            // 2. Verificar se há alguém na Fila de Espera (Zona Y - 1 a 4)
+            // Procuramos um botão VERMELHO na zona Y
+            var vagasY = new[] { btn1, btn2, btn3, btn4 };
+            var camiaoEmEspera = vagasY.FirstOrDefault(b => b.BackColor == Color.IndianRed);
+
+            if (camiaoEmEspera != null)
+            {
+                // REQUISITO: Semáforo VERDE para autorizar passagem
+                btnSemaforo.UseVisualStyleBackColor = false;
+                btnSemaforo.BackColor = Color.LightGreen;
+
+                // Pequena pausa para simular o movimento (opcional, mas fica melhor visualmente)
+                await Task.Delay(1000);
+
+                // Lógica de Movimento:
+                // a) Camião sai de Y (Fica Verde)
+                camiaoEmEspera.BackColor = Color.LightGreen;
+
+                // b) Camião entra em X (A vaga que libertámos volta a ficar Vermelha)
+                slotParaSair.BackColor = Color.IndianRed;
+
+                // c) Semáforo fecha
+                var vagasX = new[] { btn5, btn6, btn7, btn8 };
+                var primeiraLivreX = vagasX.FirstOrDefault(b => b.BackColor == Color.LightGreen);
+                    // Se após ocupar todas as vagas X estiverem vermelhas, liga semáforo vermelho
+                    if (vagasX.All(b => b.BackColor == Color.IndianRed))
+                    {
+                        btnSemaforo.UseVisualStyleBackColor = false;
+                        btnSemaforo.BackColor = Color.IndianRed;
+                    }
+                else
+                {
+                    btnSemaforo.BackColor = Color.LightGreen;
+                }
+
+                return;
+                
+            }
+            btnSemaforo.BackColor = Color.LightGreen;
+            // Limpa a variável de seleção
+            slotParaSair = null;
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            // Vazio
         }
     }
 }
