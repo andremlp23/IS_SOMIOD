@@ -110,6 +110,7 @@ namespace SOMIOD_API.Controllers
                             using (SqlDataReader reader = cmd.ExecuteReader())
                             {
                                 while (reader.Read()) containers.Add(reader["Name"].ToString());
+                                // TODO -> Remover id do contentor que é mostrado
                             }
                         }
                     }
