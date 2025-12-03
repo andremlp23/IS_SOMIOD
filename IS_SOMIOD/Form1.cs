@@ -1,10 +1,11 @@
-﻿using System;
+﻿// Adicionar estas referências:
+using RestSharp;
+using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-// Adicionar estas referências:
-using RestSharp;
 
 namespace IS_SOMIOD
 {
@@ -52,7 +53,6 @@ namespace IS_SOMIOD
             slotParaSair = null;
         }
 
-        // --- LÓGICA DE BOOTSTRAP API ---
         // --- LÓGICA DE BOOTSTRAP (CORRIGIDA) ---
         private async Task CriarRecursosIniciais()
         {
@@ -60,31 +60,51 @@ namespace IS_SOMIOD
 
             // 1. Tentar criar a Aplicação
             var reqApp = new RestRequest("", Method.Post);
-            reqApp.AddJsonBody(new { res_type = "application", resource_name = APP_NAME });
+
+            var bodyApp = new Dictionary<string, object>
+            {
+                { "res-type", "application" },
+                { "resource-name", APP_NAME }
+            };
+
+            reqApp.AddJsonBody(bodyApp);
 
             var respApp = await client.ExecuteAsync(reqApp);
 
             // Se falhou e não foi por conflito (já existe), mostramos erro na consola
             if (!respApp.IsSuccessful)
             {
-                System.Diagnostics.Debug.WriteLine($"Nota: App '{APP_NAME}' talvez já exista. Status: {respApp.StatusCode}");
+                System.Diagnostics.Debug.WriteLine(
+                    $"Nota: App '{APP_NAME}' talvez já exista. Status: {respApp.StatusCode}"
+                );
             }
 
-            // 2. Tentar criar Containers (zona-descarga, zona-y, semaforo)
-            string[] containers = { "zona-descarga", "zona-y", "semaforo" };
+            // 2. Tentar criar Containers (zona-descarga, zona-estacionamento, semaforo)
+            string[] containers = { "zona-descarga", "zona-estacionamento", "semaforo" };
+
             foreach (var cont in containers)
             {
                 var reqCont = new RestRequest(APP_NAME, Method.Post);
-                reqCont.AddJsonBody(new { res_type = "container", resource_name = cont });
+
+                var bodyCont = new Dictionary<string, object>
+        {
+            { "res-type", "container" },
+            { "resource-name", cont }
+        };
+
+                reqCont.AddJsonBody(bodyCont);
 
                 var respCont = await client.ExecuteAsync(reqCont);
 
                 if (!respCont.IsSuccessful)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Nota: Container '{cont}' talvez já exista. Status: {respCont.StatusCode}");
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Nota: Container '{cont}' talvez já exista. Status: {respCont.StatusCode}"
+                    );
                 }
             }
         }
+
 
         // --- HELPER: ENVIAR PARA API ---
         private async Task EnviarDadosAPI(string container, string conteudo)
@@ -96,23 +116,27 @@ namespace IS_SOMIOD
 
                 request.AddHeader("content-type", "application/json");
 
-                var body = new
-                {
-                    res_type = "content-instance",
-                    resource_name = $"evt-{DateTime.Now.Ticks}",
-                    content = conteudo,
-                    content_type = "text/plain"
-                };
+                // Criar o body exatamente como a API exige
+                var body = new Dictionary<string, object>
+        {
+            { "res-type", "content-instance" },
+            { "resource-name", $"evt-{DateTime.Now.Ticks}" },
+            { "content", conteudo },
+            { "content-type", "text/plain" }
+        };
 
-                request.AddJsonBody(body);
+                request.AddStringBody(
+                    System.Text.Json.JsonSerializer.Serialize(body),
+                    ContentType.Json);
+
                 await client.ExecuteAsync(request);
             }
             catch (Exception ex)
             {
-                // Log de erro silencioso para não parar a simulação
                 System.Diagnostics.Debug.WriteLine("Erro API: " + ex.Message);
             }
         }
+
 
         // --- EVENTOS DE CLIQUE NAS VAGAS X (5 a 8) ---
         private void btn5_Click(object sender, EventArgs e) { HandleSlotClick(btn5); }
@@ -187,7 +211,7 @@ namespace IS_SOMIOD
                 primeiraLivreY.BackColor = Color.IndianRed;
 
                 // [API] Avisar SOMIOD que entrou na fila Y
-                await EnviarDadosAPI("zona-y", $"ocupado-fila-{primeiraLivreY.Name}");
+                await EnviarDadosAPI("zona-estacionamento", $"ocupado-fila-{primeiraLivreY.Name}");
 
                 if (vagasX.All(b => b.BackColor == Color.IndianRed))
                 {
@@ -228,7 +252,7 @@ namespace IS_SOMIOD
                 // a) Sai de Y
                 camiaoEmEspera.BackColor = Color.LightGreen;
                 // [API] Saiu da fila
-                await EnviarDadosAPI("zona-y", $"saiu-fila-{camiaoEmEspera.Name}");
+                await EnviarDadosAPI("zona-estacionamento", $"saiu-fila-{camiaoEmEspera.Name}");
 
                 // b) Entra em X
                 slotParaSair.BackColor = Color.IndianRed;
@@ -257,6 +281,11 @@ namespace IS_SOMIOD
             btnSemaforo.BackColor = Color.LightGreen;
             await EnviarDadosAPI("semaforo", "<cmd>VERDE</cmd>"); // Garante estado correto
             slotParaSair = null;
+        }
+
+        private void btnMais1_Click_1(object sender, EventArgs e)
+        {
+
         }
     }
 }
