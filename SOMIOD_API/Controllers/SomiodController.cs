@@ -120,7 +120,7 @@ namespace SOMIOD_API.Controllers
 
             //Obter Aplicação
             Application app = null;
-            string sql = "SELECT * FROM Application WHERE Name = @Name";
+            string sql = "SELECT Name, CreationDate FROM Application WHERE Name = @Name";
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
@@ -134,7 +134,6 @@ namespace SOMIOD_API.Controllers
                         {
                             app = new Application
                             {
-                                Id = (int)reader["Id"],
                                 ResourceName = (string)reader["Name"],
                                 CreationDateTime = (DateTime)reader["CreationDate"],
                                 ResType = "application"
