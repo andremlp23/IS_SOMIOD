@@ -22,7 +22,7 @@ namespace SOMIOD_API.Controllers
         // 1.(Applications)
         // =============================================================
 
-        // POST: api/somiod
+        // POST: api/somiod (Criar Aplicações)
         [HttpPost]
         [Route("")]
         public IHttpActionResult CreateApplication([FromBody] Application app)
@@ -30,29 +30,55 @@ namespace SOMIOD_API.Controllers
             if (app == null) return BadRequest("Body vazio.");
             if (app.ResType != "application") return BadRequest("O 'res-type' deve ser 'application'.");
 
-            string sql = "INSERT INTO Application (Name) VALUES (@Name)";
+            string finalName = app.ResourceName;
 
             try
             {
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+
+                    // Procura pelo applicationName exato ou que comecem por "applicationName-"
+                    string checkSql = "SELECT COUNT(*) FROM Application WHERE Name = @Name OR Name LIKE @NameLike";
+
+                    int count = 0;
+
+                    using (SqlCommand checkCmd = new SqlCommand(checkSql, conn))
                     {
-                        cmd.Parameters.AddWithValue("@Name", app.ResourceName);
+                        checkCmd.Parameters.AddWithValue("@Name", app.ResourceName);
+
+                        checkCmd.Parameters.AddWithValue("@NameLike", app.ResourceName + "-%");
+
+                       
+                        count = (int)checkCmd.ExecuteScalar();
+                    }
+
+
+                    // "applicationName-Number" onde Number é o total encontrado
+                    if (count > 0)
+                    {
+                        finalName = $"{app.ResourceName}-{count}";
+                    }
+
+                    string insertSql = "INSERT INTO Application (Name) VALUES (@Name)";
+
+                    using (SqlCommand cmd = new SqlCommand(insertSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@Name", finalName);
                         cmd.ExecuteNonQuery();
                     }
                 }
             }
             catch (SqlException ex)
             {
-                if (ex.Number == 2627 || ex.Number == 2601) // Unique Constraint
-                    return Content(HttpStatusCode.Conflict, $"A aplicação '{app.ResourceName}' já existe.");
+                // Mantemos o catch para conflitos raros (ex: concorrência)
+                if (ex.Number == 2627 || ex.Number == 2601)
+                    return Content(HttpStatusCode.Conflict, $"Erro de conflito: A aplicação '{finalName}' já existe.");
 
                 return InternalServerError(ex);
             }
 
-            return Ok($"Aplicação '{app.ResourceName}' criada com sucesso.");
+            return Ok($"Aplicação '{finalName}' criada com sucesso.");
         }
 
         // GET: api/somiod (Listar Aplicações)

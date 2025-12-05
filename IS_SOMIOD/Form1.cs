@@ -80,7 +80,7 @@ namespace IS_SOMIOD
             }
 
             // 2. Tentar criar Containers (zona-descarga, zona-estacionamento, semaforo)
-            string[] containers = { "zona-descarga", "zona-estacionamento", "semaforo" };
+            string[] containers = { "zona-descarga", "zona-estacionamento", "semaforo", "luzesParque"};
 
             foreach (var cont in containers)
             {
