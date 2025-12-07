@@ -387,15 +387,27 @@ namespace SOMIOD_API.Controllers
 
                     string sql = "INSERT INTO Subscription (Name, EventId, Endpoint, ParentContainerId) VALUES (@Name, @Event, @Endpoint, @ParentId)";
 
-                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+                    try
                     {
-                        cmd.Parameters.AddWithValue("@Name", sub.ResourceName);
-                        cmd.Parameters.AddWithValue("@Event", sub.Evt);
-                        cmd.Parameters.AddWithValue("@Endpoint", sub.Endpoint);
-                        cmd.Parameters.AddWithValue("@ParentId", contId);
-                        cmd.ExecuteNonQuery();
+                        using (SqlCommand cmd = new SqlCommand(sql, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@Name", sub.ResourceName);
+                            cmd.Parameters.AddWithValue("@Event", sub.Evt);
+                            cmd.Parameters.AddWithValue("@Endpoint", sub.Endpoint);
+                            cmd.Parameters.AddWithValue("@ParentId", contId);
+                            cmd.ExecuteNonQuery();
+                        }
+                        return Ok($"Subscrição '{sub.ResourceName}' criada.");
                     }
-                    return Ok($"Subscrição '{sub.ResourceName}' criada.");
+                    catch (SqlException ex)
+                    {
+                        // 2627 e 2601 são códigos de erro do SQL Server para Violação de Unique Key
+                        if (ex.Number == 2627 || ex.Number == 2601)
+                        {
+                            return Content(HttpStatusCode.Conflict, $"A subscrição '{sub.ResourceName}' já existe neste contentor.");
+                        }
+                        return InternalServerError(ex);
+                    }
                 }
             }
 

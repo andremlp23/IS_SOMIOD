@@ -89,48 +89,101 @@ namespace IS_SOMIOD
             btnMenos1.BackColor = SystemColors.Control;
         }
 
-        // -----------------------
-        // API: Bootstrap helpers
-        // -----------------------
-        private async Task BootstrapAsync()
+        // Helper genérico para verificar sucesso ou conflito (já existe)
+        private bool IsSuccessOrExists(RestResponse response)
         {
-            try
-            {
-                await CreateApplicationAsync();
-                await CreateContainerAsync("zona-x");
-                await CreateContainerAsync("zona-y");
-                await CreateContainerAsync("semaforo");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("Bootstrap exception: " + ex.Message);
-            }
-        }
+            // 200/201 = Criado com sucesso
+            if (response.IsSuccessful) return true;
 
+            // 409 = Conflict (A sua API retorna isto quando viola a Unique Constraint do SQL)
+            // 400 = Bad Request (Algumas implementações retornam isto em erros de SQL)
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict ||
+                response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                return true; // Consideramos sucesso porque o recurso já lá está
+            }
+
+            return false;
+        }
         private async Task CreateApplicationAsync()
         {
             var client = new RestClient(API_BASE);
             var req = new RestRequest("", Method.Post);
 
-            // API expects these fields (adjust names if your middleware expects different keys)
-            var body = new
-            {
-                res_type = "application",
-                resource_name = APP_NAME
-            };
+            var body = new Dictionary<string, object>
+    {
+        { "res-type", "application" },
+        { "resource-name", APP_NAME }
+    };
 
             req.AddJsonBody(body);
 
-            RestResponse resp = null;
             try
             {
-                resp = await client.ExecuteAsync(req);
-                System.Diagnostics.Debug.WriteLine($"CreateApplication: Success={resp.IsSuccessful}, Status={(int)resp.StatusCode}");
+                var resp = await client.ExecuteAsync(req);
+
+                if (IsSuccessOrExists(resp))
+                {
+                    System.Diagnostics.Debug.WriteLine($"App '{APP_NAME}': OK (Criada ou Já Existe).");
+                }
+                else
+                {
+                    // Erro real (ex: 404, 500 servidor em baixo)
+                    System.Diagnostics.Debug.WriteLine($"ERRO CRÍTICO criar App: {resp.StatusCode} - {resp.Content}");
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("CreateApplication error: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("Exceção ao ligar à API: " + ex.Message);
             }
+        }
+        // -----------------------
+        // API: Bootstrap helpers
+        // -----------------------
+        private async Task BootstrapAsync()
+        {
+            // 1. Criar Aplicação (Se falhar, provavelmente o resto falha, mas tentamos igual)
+            await CreateApplicationAsync();
+
+            // 2. Criar Contentores (Independentes uns dos outros)
+            await CreateContainerAsync("zona-x");
+            await CreateContainerAsync("zona-y");
+            await CreateContainerAsync("semaforo");
+
+            // 3. Criar Subscrição (Só funciona se o container semaforo existir)
+            await CreateSubscriptionAsync("semaforo", "sub-hardware", "mqtt://localhost:1883", 1);
+        }
+
+        private async Task CreateSubscriptionAsync(string container, string name, string endpoint, int evt)
+        {
+            var client = new RestClient(API_BASE);
+            var req = new RestRequest($"{APP_NAME}/{container}", Method.Post);
+
+            var body = new Dictionary<string, object>
+    {
+        { "res-type", "subscription" },
+        { "resource-name", name },
+        { "endpoint", endpoint },
+        { "evt", evt.ToString() }
+    };
+
+            req.AddJsonBody(body);
+
+            try
+            {
+                var resp = await client.ExecuteAsync(req);
+
+                if (IsSuccessOrExists(resp))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Subscription '{name}': OK.");
+                }
+                else
+                {
+                    // Subscription falha muitas vezes se o MQTT endpoint for inválido ou container não existir
+                    System.Diagnostics.Debug.WriteLine($"ERRO criar Subscription: {resp.StatusCode}");
+                }
+            }
+            catch { /* Ignorar falhas de subscrição silenciosamente para não parar a UI */ }
         }
 
         private async Task CreateContainerAsync(string containerName)
@@ -138,23 +191,30 @@ namespace IS_SOMIOD
             var client = new RestClient(API_BASE);
             var req = new RestRequest(APP_NAME, Method.Post);
 
-            var body = new
-            {
-                res_type = "container",
-                resource_name = containerName
-            };
+            var body = new Dictionary<string, object>
+    {
+        { "res-type", "container" },
+        { "resource-name", containerName }
+    };
 
             req.AddJsonBody(body);
 
-            RestResponse resp = null;
             try
             {
-                resp = await client.ExecuteAsync(req);
-                System.Diagnostics.Debug.WriteLine($"CreateContainer('{containerName}'): Success={resp.IsSuccessful}, Status={(int)resp.StatusCode}");
+                var resp = await client.ExecuteAsync(req);
+
+                if (IsSuccessOrExists(resp))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Container '{containerName}': OK.");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"ERRO criar Container '{containerName}': {resp.StatusCode}");
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"CreateContainer('{containerName}') error: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine($"Exceção Container '{containerName}': " + ex.Message);
             }
         }
 
@@ -168,26 +228,32 @@ namespace IS_SOMIOD
                 var client = new RestClient(API_BASE);
                 var req = new RestRequest($"{APP_NAME}/{container}", Method.Post);
 
-                var body = new
-                {
-                    res_type = "content-instance",
-                    resource_name = $"evt-{DateTime.Now.Ticks}",
-                    content = content,
-                    content_type = "text/plain"
-                };
+                // CORREÇÃO: Usar Dictionary para enviar "content-instance" com hífens
+                var body = new Dictionary<string, object>
+        {
+            { "res-type", "content-instance" },
+            { "resource-name", $"evt-{DateTime.Now.Ticks}" },
+            { "content", content },
+            { "content-type", "text/plain" } // Atenção: "content-type" com hífen se a API esperar isso, ou "content_type" se for mapeado na classe C#
+        };
+
+                // NOTA: Se o seu Controller espera "ContentType" (PascalCase) ou "content_type", ajuste a chave acima.
+                // Mas o "res-type" é garantido que precisa de hífen.
 
                 req.AddJsonBody(body);
 
                 var resp = await client.ExecuteAsync(req);
-                System.Diagnostics.Debug.WriteLine($"SendData '{container}' content='{content}': Success={resp.IsSuccessful}, Status={(int)resp.StatusCode}");
+                System.Diagnostics.Debug.WriteLine($"SendData '{container}': Status={(int)resp.StatusCode}");
                 return resp.IsSuccessful;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"SendDataAsync('{container}') error: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine($"SendDataAsync error: " + ex.Message);
                 return false;
             }
         }
+
+
 
         /// <summary>
         /// Attempts to delete from container using HTTP DELETE. If not supported by middleware falls back to posting a "saida" event.
