@@ -1,5 +1,4 @@
-﻿// Adicionar estas referências:
-using RestSharp;
+﻿using RestSharp;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -11,29 +10,26 @@ using MQTTnet.Client;
 using MQTTnet.Client.Options;
 using System.Text;
 using System.Threading;
+using System.Xml.Linq; // Necessário para parsear notificação
 
 namespace IS_SOMIOD
 {
     public partial class Form1 : Form
     {
-        // --- CONFIGURAÇÕES DA API SOMIOD ---
+        // --- CONFIG ---
         private const string API_BASE = "http://localhost:62056/api/somiod";
         private const string APP_NAME = "smart-dock";
 
-        // MQTT - CORRIGIDO PARA O FORMATO DO CONTROLLER
+        // MQTT
         private IMqttClient mqttClient;
         private const string MQTT_BROKER = "127.0.0.1";
         private const int MQTT_PORT = 1883;
+        private const string MQTT_TOPIC_SEMAFORO = "api/somiod/smart-dock/semaforo";
 
-        // Tópico correto do Controller corrigido:
-        // api/somiod/{app}/{container}/{subscription}
-        private const string MQTT_TOPIC = "api/somiod/smart-dock/semaforo/sub-hardware";
-
-        // UI slot groups
+        // UI Arrays
         private Button[] zonaXSlots;
         private Button[] zonaYSlots;
 
-        // Colors
         private readonly Color FreeColor = Color.LightGreen;
         private readonly Color OccupiedColor = Color.IndianRed;
 
@@ -41,10 +37,11 @@ namespace IS_SOMIOD
         {
             InitializeComponent();
 
-            // Eventos UI
+            // Setup Buttons UI
             this.btnMais1.Click += btnMais1_Click;
             this.btnMenos1.Click += btnMenos1_Click;
 
+            // Certifique-se que estes botões existem no Designer
             zonaXSlots = new[] { btn1, btn2, btn3, btn4 };
             zonaYSlots = new[] { btn5, btn6, btn7, btn8 };
 
@@ -62,11 +59,8 @@ namespace IS_SOMIOD
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            try
-            {
-                mqttClient?.DisconnectAsync().GetAwaiter().GetResult();
-            }
-            catch { }
+            if (mqttClient != null && mqttClient.IsConnected)
+                mqttClient.DisconnectAsync().GetAwaiter().GetResult();
         }
 
         private void InitializeDefaultColors()
@@ -76,269 +70,215 @@ namespace IS_SOMIOD
                 b.UseVisualStyleBackColor = false;
                 b.BackColor = FreeColor;
             }
-
+            btnSemaforo.UseVisualStyleBackColor = false;
             btnSemaforo.BackColor = FreeColor;
         }
 
-        private bool IsSuccessOrExists(RestResponse resp)
-        {
-            if (resp.IsSuccessful) return true;
-
-            if (resp.StatusCode == System.Net.HttpStatusCode.Conflict ||
-                resp.StatusCode == System.Net.HttpStatusCode.BadRequest)
-                return true;
-
-            return false;
-        }
-
-        // ============================================================
-        // BOOTSTRAP
-        // ============================================================
+        // ----------------------------------------------------
+        // API BOOTSTRAP (Criação da estrutura)
+        // ----------------------------------------------------
         private async Task BootstrapAsync()
         {
-            await CreateApplicationAsync();
-            await CreateContainerAsync("zona-x");
-            await CreateContainerAsync("zona-y");
-            await CreateContainerAsync("semaforo");
+            await CreateResource("application", "", APP_NAME);
+            await CreateResource("container", APP_NAME, "zona-x");
+            await CreateResource("container", APP_NAME, "zona-y");
+            await CreateResource("container", APP_NAME, "semaforo");
 
-            // Subscription corrigida
-            await CreateSubscriptionAsync("semaforo", "sub-hardware", "mqtt://localhost:1883", 1);
+            // Subscreve ao contentor 'semaforo' para ouvir mudanças (criadas por App B ou lógica interna)
+            // O endpoint deve apontar para o broker MQTT local
+            await CreateSubscription("semaforo", "sub-app-main", $"mqtt://{MQTT_BROKER}:{MQTT_PORT}", 1);
         }
 
-        private async Task CreateApplicationAsync()
+        // Helper genérico para criar recursos
+        private async Task CreateResource(string type, string parentPath, string name, string subEndpoint = null, int evt = 1)
         {
             var client = new RestClient(API_BASE);
-            var req = new RestRequest("", Method.Post);
+            // Define o path do POST (Parent)
+            string resourcePath = type == "application" ? "" : parentPath;
+            var req = new RestRequest(resourcePath, Method.Post);
 
             var body = new Dictionary<string, object>
             {
-                { "res-type", "application" },
-                { "resource-name", APP_NAME }
+                { "res-type", type },
+                { "resource-name", name }
             };
+
+            if (type == "subscription")
+            {
+                body.Add("endpoint", subEndpoint);
+                body.Add("evt", evt);
+            }
 
             req.AddJsonBody(body);
 
-            var resp = await client.ExecuteAsync(req);
-
-            if (IsSuccessOrExists(resp))
-                return;
-
-            System.Diagnostics.Debug.WriteLine("ERRO criar app: " + resp.StatusCode);
-        }
-
-        private async Task CreateContainerAsync(string name)
-        {
-            var client = new RestClient(API_BASE);
-            var req = new RestRequest(APP_NAME, Method.Post);
-
-            req.AddJsonBody(new Dictionary<string, object>
+            try
             {
-                { "res-type", "container" },
-                { "resource-name", name }
-            });
-
-            var resp = await client.ExecuteAsync(req);
-
-            if (!IsSuccessOrExists(resp))
-                System.Diagnostics.Debug.WriteLine("ERRO criar container: " + name);
+                var resp = await client.ExecuteAsync(req);
+                // 409 Conflict é aceitável (já existe)
+                if (!resp.IsSuccessful && resp.StatusCode != System.Net.HttpStatusCode.Conflict)
+                    System.Diagnostics.Debug.WriteLine($"Error creating {name}: {resp.Content}");
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
         }
 
-        private async Task CreateSubscriptionAsync(string container, string subName, string endpoint, int evt)
+        private async Task CreateSubscription(string container, string name, string endpoint, int evt)
+        {
+            // O URL para criar subscription é .../App/Container
+            await CreateResource("subscription", $"{APP_NAME}/{container}", name, endpoint, evt);
+        }
+
+        // ----------------------------------------------------
+        // OPERAÇÕES LÓGICAS (Send Data / Delete)
+        // ----------------------------------------------------
+        private async Task<bool> SendDataAsync(string container, string content)
         {
             var client = new RestClient(API_BASE);
             var req = new RestRequest($"{APP_NAME}/{container}", Method.Post);
 
-            req.AddJsonBody(new Dictionary<string, object>
+            var body = new Dictionary<string, object>
             {
-                { "res-type", "subscription" },
-                { "resource-name", subName },
-                { "endpoint", endpoint },
-                { "evt", evt.ToString() }
-            });
+                { "res-type", "content-instance" },
+                { "resource-name", $"evt-{DateTime.Now.Ticks}" },
+                { "content", content },
+                { "content-type", "application/xml" }
+            };
+            req.AddJsonBody(body);
 
             var resp = await client.ExecuteAsync(req);
-
-            if (!IsSuccessOrExists(resp))
-                System.Diagnostics.Debug.WriteLine("ERRO criar subscription.");
+            return resp.IsSuccessful;
         }
 
-        // ============================================================
-        // SEND & DELETE
-        // ============================================================
-        private async Task<bool> SendDataAsync(string container, string content)
-        {
-            try
-            {
-                var client = new RestClient(API_BASE);
-                var req = new RestRequest($"{APP_NAME}/{container}", Method.Post);
-
-                req.AddJsonBody(new Dictionary<string, object>
-                {
-                    { "res-type", "content-instance" },
-                    { "resource-name", $"evt-{DateTime.Now.Ticks}" },
-                    { "content", content },
-
-                    // CORRIGIDO para o controller:
-                    { "content_type", "text/plain" }
-                });
-
-                var resp = await client.ExecuteAsync(req);
-                return resp.IsSuccessful;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private async Task<bool> DeleteFromContainerAsync(string container, string id = null)
+        private async Task DeleteFromContainerAsync(string container, string resourceName)
         {
             var client = new RestClient(API_BASE);
-            var req = new RestRequest($"{APP_NAME}/{container}", Method.Delete);
-
-            var resp = await client.ExecuteAsync(req);
-
-            if (resp.IsSuccessful)
-                return true;
-
-            // fallback
-            return await SendDataAsync(container, "saiu");
+            // URL: .../App/Container/ResourceName
+            var req = new RestRequest($"{APP_NAME}/{container}/{resourceName}", Method.Delete);
+            await client.ExecuteAsync(req);
         }
 
-        // ============================================================
-        // UI EVENTS
-        // ============================================================
-        private async void btnMais1_Click(object sender, EventArgs e)
-        {
-            var free = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
-            if (free == null)
-            {
-                MessageBox.Show("Zona X cheia!");
-                return;
-            }
-
-            free.BackColor = OccupiedColor;
-
-            await SendDataAsync("zona-x", "<matricula>CAMIAO-01</matricula>");
-            UpdateSemaphoreStateBySlots();
-        }
-
-        private async void btnMenos1_Click(object sender, EventArgs e)
-        {
-            var occ = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
-            if (occ == null)
-            {
-                MessageBox.Show("Nenhum camião em zona Y");
-                return;
-            }
-
-            occ.BackColor = FreeColor;
-
-            await DeleteFromContainerAsync("zona-y", occ.Name);
-            UpdateSemaphoreStateBySlots();
-        }
-
-        // ============================================================
-        // MQTT
-        // ============================================================
+        // ----------------------------------------------------
+        // MQTT HANDLER (Parsing XML)
+        // ----------------------------------------------------
         private async Task StartMqttAsync()
         {
-            try
+            var factory = new MqttFactory();
+            mqttClient = factory.CreateMqttClient();
+            var options = new MqttClientOptionsBuilder()
+                .WithClientId("Client_App_" + Guid.NewGuid())
+                .WithTcpServer(MQTT_BROKER, MQTT_PORT)
+                .Build();
+
+            mqttClient.UseConnectedHandler(async e =>
             {
-                var factory = new MqttFactory();
-                mqttClient = factory.CreateMqttClient();
+                await mqttClient.SubscribeAsync(new MQTTnet.Client.Subscribing.MqttClientSubscribeOptionsBuilder()
+                    .WithTopicFilter(MQTT_TOPIC_SEMAFORO)
+                    .Build());
+            });
 
-                var options = new MqttClientOptionsBuilder()
-                    .WithClientId("Simu_" + Guid.NewGuid().ToString("N").Substring(0, 6))
-                    .WithTcpServer(MQTT_BROKER, MQTT_PORT)
-                    .WithCleanSession()
-                    .Build();
+            mqttClient.UseApplicationMessageReceivedHandler(e =>
+            {
+                string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+                // Payload agora é XML: <Notification><Content>...</Content></Notification>
 
-                mqttClient.UseConnectedHandler(async _ =>
+                try
                 {
-                    System.Diagnostics.Debug.WriteLine("MQTT connected.");
-                    await mqttClient.SubscribeAsync(MQTT_TOPIC);
-                });
+                    XDocument doc = XDocument.Parse(payload);
+                    // Buscar o valor dentro de <Content>
+                    string contentVal = doc.Root.Element("Content")?.Value;
 
-                mqttClient.UseApplicationMessageReceivedHandler(e =>
-                {
-                    var payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload ?? new byte[0]);
-                    var msg = payload.Trim().ToUpperInvariant();
-
-                    this.BeginInvoke(new Action(async () =>
+                    // O conteúdo pode ser ele próprio um XML como <cmd>VERDE</cmd> ou texto simples
+                    if (!string.IsNullOrEmpty(contentVal))
                     {
-                        if (msg.Contains("VERDE"))
+                        if (contentVal.Contains("VERDE"))
                         {
-                            SetSemaphoreColorGreen();
-                            await MoveOneTruckFromXToYAsync();
+                            this.BeginInvoke(new Action(async () => {
+                                SetSemaphoreColor(Color.LightGreen);
+                                await MoveOneTruckAsync();
+                            }));
                         }
-                        else if (msg.Contains("VERMELHO"))
+                        else if (contentVal.Contains("VERMELHO"))
                         {
-                            SetSemaphoreColorRed();
+                            this.BeginInvoke(new Action(() => SetSemaphoreColor(Color.IndianRed)));
                         }
-                    }));
-                });
+                    }
+                }
+                catch
+                {
+                    System.Diagnostics.Debug.WriteLine("Erro ao parsear XML MQTT: " + payload);
+                }
+            });
 
-                await mqttClient.ConnectAsync(options);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("MQTT ERROR: " + ex.Message);
-            }
+            await mqttClient.ConnectAsync(options, CancellationToken.None);
         }
 
-        // ============================================================
-        // MOVE TRUCK X → Y
-        // ============================================================
-        private async Task MoveOneTruckFromXToYAsync()
+        // ----------------------------------------------------
+        // LÓGICA DE MOVIMENTO
+        // ----------------------------------------------------
+
+        // Entrada Manual (Zona X)
+        private async void btnMais1_Click(object sender, EventArgs e)
         {
-            var occX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
+            var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
+            if (slot == null) return; // Cheio
+
+            slot.BackColor = OccupiedColor; // Atualiza visual
+            // Informa Middleware
+            await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
+
+            CheckAndUpdateSemaforo();
+        }
+
+        // Saída Manual (Zona Y)
+        private async void btnMenos1_Click(object sender, EventArgs e)
+        {
+            var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
+            if (slot == null) return; // Vazio
+
+            slot.BackColor = FreeColor;
+            // Apaga do middleware (simula saída)
+            // Se guardou o nome do recurso no botão (Tag ou Name), use-o. 
+            // Senão, estamos apenas a simular o evento.
+            // Aqui assumimos que apagamos um recurso dummy ou genérico se não tivermos ID.
+            // Para simplificar a demo, enviamos um evento "saiu" se não tivermos o ID exato para Delete.
+            await SendDataAsync("zona-y", "saiu");
+
+            CheckAndUpdateSemaforo();
+        }
+
+        // Movimento Automático (X -> Y) quando Verde
+        private async Task MoveOneTruckAsync()
+        {
+            var truckX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
             var freeY = zonaYSlots.FirstOrDefault(b => b.BackColor == FreeColor);
 
-            if (occX == null || freeY == null)
+            if (truckX != null && freeY != null)
             {
-                SetSemaphoreColorRed();
-                return;
+                truckX.BackColor = FreeColor;
+                await Task.Delay(500); // Animação
+                freeY.BackColor = OccupiedColor;
+
+                // Notificar middleware da mudança
+                // Idealmente faria DELETE em X e POST em Y.
+                // Como não estamos a rastrear IDs dos recursos criados nos botões nesta demo simples:
+                await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
+
+                CheckAndUpdateSemaforo();
             }
-
-            occX.BackColor = FreeColor;
-            await DeleteFromContainerAsync("zona-x", occX.Name);
-
-            await Task.Delay(300);
-
-            freeY.BackColor = OccupiedColor;
-            await SendDataAsync("zona-y", "<matricula>CAMIAO-01</matricula>");
-
-            UpdateSemaphoreStateBySlots();
         }
 
-        // ============================================================
-        // SEMAFORO
-        // ============================================================
-        private void SetSemaphoreColorGreen()
+        private async void CheckAndUpdateSemaforo()
         {
-            btnSemaforo.BackColor = Color.LightGreen;
+            // Se Zona Y cheia -> Vermelho
+            bool zonaYFull = zonaYSlots.All(b => b.BackColor == OccupiedColor);
+            string cmd = zonaYFull ? "<cmd>VERMELHO</cmd>" : "<cmd>VERDE</cmd>";
+
+            // Publica no contentor semaforo. O middleware apanha isto e envia MQTT de volta para nós (e App B)
+            await SendDataAsync("semaforo", cmd);
         }
 
-        private void SetSemaphoreColorRed()
+        private void SetSemaphoreColor(Color c)
         {
-            btnSemaforo.BackColor = Color.IndianRed;
-        }
-
-        private async void UpdateSemaphoreStateBySlots()
-        {
-            bool fullY = zonaYSlots.All(b => b.BackColor == OccupiedColor);
-
-            if (fullY)
-            {
-                SetSemaphoreColorRed();
-                await SendDataAsync("semaforo", "<cmd>VERMELHO</cmd>");
-            }
-            else
-            {
-                SetSemaphoreColorGreen();
-                await SendDataAsync("semaforo", "<cmd>VERDE</cmd>");
-            }
+            btnSemaforo.BackColor = c;
         }
     }
 }
