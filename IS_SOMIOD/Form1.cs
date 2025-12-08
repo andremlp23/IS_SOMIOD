@@ -218,14 +218,22 @@ namespace IS_SOMIOD
         // Entrada Manual (Zona X)
         private async void btnMais1_Click(object sender, EventArgs e)
         {
-            var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
-            if (slot == null) return; // Cheio
+            btnMais1.Enabled = false;
+            try
+            {
+                var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
+                if (slot == null) return;
 
-            slot.BackColor = OccupiedColor; // Atualiza visual
-            // Informa Middleware
-            await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
+                slot.BackColor = OccupiedColor;
+                await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
 
-            CheckAndUpdateSemaforo();
+                // [CORREÇÃO] force: true (Porque fui eu que cliquei, quero que executes!)
+                CheckAndUpdateSemaforo(force: true);
+            }
+            finally
+            {
+                btnMais1.Enabled = true;
+            }
         }
 
         // Saída Manual (Zona Y)
@@ -257,23 +265,28 @@ namespace IS_SOMIOD
                 await Task.Delay(500); // Animação
                 freeY.BackColor = OccupiedColor;
 
-                // Notificar middleware da mudança
-                // Idealmente faria DELETE em X e POST em Y.
-                // Como não estamos a rastrear IDs dos recursos criados nos botões nesta demo simples:
                 await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
 
-                CheckAndUpdateSemaforo();
+                CheckAndUpdateSemaforo(force:false);
             }
         }
 
-        private async void CheckAndUpdateSemaforo()
+        private async void CheckAndUpdateSemaforo(bool force = false)
         {
-            // Se Zona Y cheia -> Vermelho
+            // 1. Calcula o estado desejado
             bool zonaYFull = zonaYSlots.All(b => b.BackColor == OccupiedColor);
-            string cmd = zonaYFull ? "<cmd>VERMELHO</cmd>" : "<cmd>VERDE</cmd>";
+            string novoComando = zonaYFull ? "<cmd>VERMELHO</cmd>" : "<cmd>VERDE</cmd>";
 
-            // Publica no contentor semaforo. O middleware apanha isto e envia MQTT de volta para nós (e App B)
-            await SendDataAsync("semaforo", cmd);
+            // 2. Verifica o estado ATUAL visual
+            bool isAtualmenteVerde = btnSemaforo.BackColor == Color.LightGreen;
+            bool queroVerde = !zonaYFull;
+
+            bool estadoMudou = (isAtualmenteVerde != queroVerde);
+
+            if (force || estadoMudou)
+            {
+                await SendDataAsync("semaforo", novoComando);
+            }
         }
 
         private void SetSemaphoreColor(Color c)

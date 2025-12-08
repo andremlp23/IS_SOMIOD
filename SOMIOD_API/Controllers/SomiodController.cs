@@ -494,8 +494,11 @@ namespace SOMIOD_API.Controllers
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                // Verifica quem subscreveu a este tipo de evento (1 ou 2)
-                string sql = "SELECT Endpoint FROM Subscription WHERE ParentContainerId = @ParentId AND EventId = @Evt";
+
+                // [CORREÇÃO] Adicionado 'DISTINCT' para evitar enviar mensagens duplicadas 
+                // caso existam múltiplas subscrições idênticas na BD (lixo de testes anteriores).
+                string sql = "SELECT DISTINCT Endpoint FROM Subscription WHERE ParentContainerId = @ParentId AND EventId = @Evt";
+
                 SqlCommand cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ParentId", containerId);
                 cmd.Parameters.AddWithValue("@Evt", eventType);
@@ -507,7 +510,10 @@ namespace SOMIOD_API.Controllers
 
             if (endpoints.Count == 0) return;
 
-            // Cria o XML que a aplicação Windows Forms espera
+            // ... (O resto do método mantém-se igual: Criação do XML e envio MQTT) ...
+            // ...
+
+            // (Apenas para contexto, o resto do código abaixo mantém-se igual ao que tinhas)
             XElement xmlMsg = new XElement("Notification",
                 new XElement("Event", eventType == 1 ? "Creation" : "Deletion"),
                 new XElement("Resource", resourceName),
@@ -518,7 +524,6 @@ namespace SOMIOD_API.Controllers
             string payload = xmlMsg.ToString();
             string topic = $"api/somiod/{appName}/{containerName}";
 
-            // Envia para cada endpoint MQTT encontrado
             foreach (var ep in endpoints)
             {
                 if (ep.ToLower().StartsWith("mqtt://"))
