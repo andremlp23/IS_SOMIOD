@@ -48,7 +48,7 @@
             // 
             this.btn4.BackColor = System.Drawing.Color.LightGreen;
             this.btn4.Location = new System.Drawing.Point(16, 6);
-            this.btn4.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn4.Margin = new System.Windows.Forms.Padding(2);
             this.btn4.Name = "btn4";
             this.btn4.Size = new System.Drawing.Size(87, 123);
             this.btn4.TabIndex = 0;
@@ -59,7 +59,7 @@
             // 
             this.btn3.BackColor = System.Drawing.Color.LightGreen;
             this.btn3.Location = new System.Drawing.Point(112, 6);
-            this.btn3.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn3.Margin = new System.Windows.Forms.Padding(2);
             this.btn3.Name = "btn3";
             this.btn3.Size = new System.Drawing.Size(87, 123);
             this.btn3.TabIndex = 1;
@@ -70,7 +70,7 @@
             // 
             this.btn1.BackColor = System.Drawing.Color.LightGreen;
             this.btn1.Location = new System.Drawing.Point(303, 6);
-            this.btn1.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn1.Margin = new System.Windows.Forms.Padding(2);
             this.btn1.Name = "btn1";
             this.btn1.Size = new System.Drawing.Size(87, 123);
             this.btn1.TabIndex = 3;
@@ -81,7 +81,7 @@
             // 
             this.btn2.BackColor = System.Drawing.Color.LightGreen;
             this.btn2.Location = new System.Drawing.Point(207, 6);
-            this.btn2.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn2.Margin = new System.Windows.Forms.Padding(2);
             this.btn2.Name = "btn2";
             this.btn2.Size = new System.Drawing.Size(87, 123);
             this.btn2.TabIndex = 2;
@@ -92,7 +92,7 @@
             // 
             this.btn8.BackColor = System.Drawing.Color.LightGreen;
             this.btn8.Location = new System.Drawing.Point(303, 321);
-            this.btn8.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn8.Margin = new System.Windows.Forms.Padding(2);
             this.btn8.Name = "btn8";
             this.btn8.Size = new System.Drawing.Size(87, 123);
             this.btn8.TabIndex = 7;
@@ -103,7 +103,7 @@
             // 
             this.btn7.BackColor = System.Drawing.Color.LightGreen;
             this.btn7.Location = new System.Drawing.Point(207, 321);
-            this.btn7.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn7.Margin = new System.Windows.Forms.Padding(2);
             this.btn7.Name = "btn7";
             this.btn7.Size = new System.Drawing.Size(87, 123);
             this.btn7.TabIndex = 6;
@@ -114,7 +114,7 @@
             // 
             this.btn6.BackColor = System.Drawing.Color.LightGreen;
             this.btn6.Location = new System.Drawing.Point(112, 321);
-            this.btn6.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn6.Margin = new System.Windows.Forms.Padding(2);
             this.btn6.Name = "btn6";
             this.btn6.Size = new System.Drawing.Size(87, 123);
             this.btn6.TabIndex = 5;
@@ -125,7 +125,7 @@
             // 
             this.btn5.BackColor = System.Drawing.Color.LightGreen;
             this.btn5.Location = new System.Drawing.Point(16, 321);
-            this.btn5.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btn5.Margin = new System.Windows.Forms.Padding(2);
             this.btn5.Name = "btn5";
             this.btn5.Size = new System.Drawing.Size(87, 123);
             this.btn5.TabIndex = 4;
@@ -155,7 +155,7 @@
             this.btnSemaforo.BackgroundImage = global::IS_SOMIOD.Properties.Resources.traffic_light;
             this.btnSemaforo.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
             this.btnSemaforo.Location = new System.Drawing.Point(16, 190);
-            this.btnSemaforo.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btnSemaforo.Margin = new System.Windows.Forms.Padding(2);
             this.btnSemaforo.Name = "btnSemaforo";
             this.btnSemaforo.Size = new System.Drawing.Size(59, 65);
             this.btnSemaforo.TabIndex = 9;
@@ -167,7 +167,7 @@
             this.btnMenos1.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
             this.btnMenos1.FlatStyle = System.Windows.Forms.FlatStyle.Popup;
             this.btnMenos1.Location = new System.Drawing.Point(446, 257);
-            this.btnMenos1.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btnMenos1.Margin = new System.Windows.Forms.Padding(2);
             this.btnMenos1.Name = "btnMenos1";
             this.btnMenos1.Size = new System.Drawing.Size(66, 64);
             this.btnMenos1.TabIndex = 8;
@@ -179,7 +179,7 @@
             this.btnMais1.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
             this.btnMais1.FlatStyle = System.Windows.Forms.FlatStyle.Popup;
             this.btnMais1.Location = new System.Drawing.Point(446, 135);
-            this.btnMais1.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.btnMais1.Margin = new System.Windows.Forms.Padding(2);
             this.btnMais1.Name = "btnMais1";
             this.btnMais1.Size = new System.Drawing.Size(66, 62);
             this.btnMais1.TabIndex = 8;
@@ -204,7 +204,7 @@
             this.Controls.Add(this.btn2);
             this.Controls.Add(this.btn3);
             this.Controls.Add(this.btn4);
-            this.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.Margin = new System.Windows.Forms.Padding(2);
             this.Name = "Form1";
             this.Text = "Form1";
             this.Load += new System.EventHandler(this.Form1_Load);

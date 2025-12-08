@@ -3,14 +3,16 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data.SqlClient;
 using System.Net;
+using System.Web.Http;
+using SOMIOD_API.Models;
+
+// [MQTT] Imports adicionados para suporte a assincronismo, XML e MQTTnet
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Http;
 using System.Xml.Linq;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Client.Options;
-using SOMIOD_API.Models;
 
 namespace SOMIOD_API.Controllers
 {
@@ -25,401 +27,435 @@ namespace SOMIOD_API.Controllers
         }
 
         // =============================================================
-        // 1. APPLICATIONS
+        // 1.(Applications)
         // =============================================================
 
+        // POST: api/somiod (Criar Aplicações)
         [HttpPost]
         [Route("")]
         public IHttpActionResult CreateApplication([FromBody] Application app)
         {
-            if (app == null || app.ResType != "application") return BadRequest("Invalid resource type.");
+            // [INFO] Mantida a lógica original de nomenclatura (ex: app-1)
+            if (app == null) return BadRequest("Body vazio.");
+            if (app.ResType != "application") return BadRequest("O 'res-type' deve ser 'application'.");
 
             string finalName = app.ResourceName;
+
             try
             {
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    // Lógica para garantir nome único simples
-                    string checkSql = "SELECT COUNT(*) FROM Application WHERE Name = @Name";
-                    SqlCommand checkCmd = new SqlCommand(checkSql, conn);
-                    checkCmd.Parameters.AddWithValue("@Name", app.ResourceName);
-                    int count = (int)checkCmd.ExecuteScalar();
 
-                    if (count > 0) finalName = $"{app.ResourceName}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                    string checkSql = "SELECT COUNT(*) FROM Application WHERE Name = @Name OR Name LIKE @NameLike";
+                    int count = 0;
+
+                    using (SqlCommand checkCmd = new SqlCommand(checkSql, conn))
+                    {
+                        checkCmd.Parameters.AddWithValue("@Name", app.ResourceName);
+                        checkCmd.Parameters.AddWithValue("@NameLike", app.ResourceName + "-%");
+                        count = (int)checkCmd.ExecuteScalar();
+                    }
+
+                    if (count > 0)
+                    {
+                        finalName = $"{app.ResourceName}-{count}";
+                    }
 
                     string insertSql = "INSERT INTO Application (Name) VALUES (@Name)";
-                    SqlCommand cmd = new SqlCommand(insertSql, conn);
-                    cmd.Parameters.AddWithValue("@Name", finalName);
-                    cmd.ExecuteNonQuery();
+
+                    using (SqlCommand cmd = new SqlCommand(insertSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@Name", finalName);
+                        cmd.ExecuteNonQuery();
+                    }
                 }
             }
-            catch (Exception ex) { return InternalServerError(ex); }
+            catch (SqlException ex)
+            {
+                if (ex.Number == 2627 || ex.Number == 2601)
+                    return Content(HttpStatusCode.Conflict, $"Erro de conflito: A aplicação '{finalName}' já existe.");
 
-            return Ok($"Application '{finalName}' created.");
+                return InternalServerError(ex);
+            }
+
+            return Ok($"Aplicação '{finalName}' criada com sucesso.");
         }
 
+        // GET: api/somiod (Listar Aplicações)
         [HttpGet]
         [Route("")]
         public IHttpActionResult GetApplicationsList()
         {
-            // Header somiod-discovery: application [cite: 71]
-            // Deve retornar caminhos completos [cite: 72]
             var apps = new List<string>();
+            string sql = "SELECT Name FROM Application";
+
             try
             {
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    SqlCommand cmd = new SqlCommand("SELECT Name FROM Application", conn);
+                    using (SqlCommand cmd = new SqlCommand(sql, conn))
                     using (SqlDataReader reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
-                            // Retorna o PATH completo conforme enunciado
-                            apps.Add($"/api/somiod/{reader["Name"]}");
+                            apps.Add(reader["Name"].ToString());
                         }
                     }
                 }
                 return Ok(apps);
             }
-            catch (Exception ex) { return InternalServerError(ex); }
+            catch (Exception ex)
+            {
+                return InternalServerError(ex);
+            }
         }
 
+        // GET: api/somiod/{appName} (Obter App OU Discovery de Contentores)
         [HttpGet]
         [Route("{appName}")]
         public IHttpActionResult GetApplication(string appName)
         {
-            // Headers handling for Discovery [cite: 71]
-            if (Request.Headers.TryGetValues("somiod-discovery", out var headerValues))
+            //Discovery (Listar Contentores)
+            IEnumerable<string> headerValues;
+            if (Request.Headers.TryGetValues("somiod-discovery", out headerValues))
             {
-                string discType = string.Join(",", headerValues);
-                if (discType == "container")
+                if (string.Join(",", headerValues) == "container")
                 {
                     var containers = new List<string>();
+                    string sqlDisc = @"SELECT C.Name FROM Container C 
+                                       JOIN Application A ON C.ParentAppId = A.Id 
+                                       WHERE A.Name = @AppName";
+
                     using (SqlConnection conn = new SqlConnection(connectionString))
                     {
                         conn.Open();
-                        string sql = @"SELECT C.Name FROM Container C 
-                                       JOIN Application A ON C.ParentAppId = A.Id 
-                                       WHERE A.Name = @AppName";
-                        SqlCommand cmd = new SqlCommand(sql, conn);
-                        cmd.Parameters.AddWithValue("@AppName", appName);
-                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
                         {
-                            while (reader.Read())
-                                containers.Add($"/api/somiod/{appName}/{reader["Name"]}");
+                            cmd.Parameters.AddWithValue("@AppName", appName);
+                            using (SqlDataReader reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read()) containers.Add(reader["Name"].ToString());
+                            }
                         }
                     }
                     return Ok(containers);
                 }
             }
 
-            // Normal GET Application
+            //Obter Aplicação
             Application app = null;
+            string sql = "SELECT Name, CreationDate FROM Application WHERE Name = @Name";
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                SqlCommand cmd = new SqlCommand("SELECT * FROM Application WHERE Name = @Name", conn);
-                cmd.Parameters.AddWithValue("@Name", appName);
-                using (SqlDataReader reader = cmd.ExecuteReader())
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
                 {
-                    if (reader.Read())
+                    cmd.Parameters.AddWithValue("@Name", appName);
+                    using (SqlDataReader reader = cmd.ExecuteReader())
                     {
-                        app = new Application
+                        if (reader.Read())
                         {
-                            ResourceName = reader["Name"].ToString(),
-                            CreationDateTime = Convert.ToDateTime(reader["CreationDate"]),
-                            ResType = "application"
-                        };
+                            app = new Application
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                ResType = "application"
+                            };
+                        }
                     }
                 }
             }
+
             if (app == null) return NotFound();
             return Ok(app);
         }
 
+        // DELETE: api/somiod/{appName}
         [HttpDelete]
         [Route("{appName}")]
         public IHttpActionResult DeleteApplication(string appName)
         {
-            // Nota: Deveria haver Cascade Delete na DB ou apagar filhos primeiro aqui.
+            string sql = "DELETE FROM Application WHERE Name = @Name";
+            int rows = 0;
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                SqlCommand cmd = new SqlCommand("DELETE FROM Application WHERE Name = @Name", conn);
-                cmd.Parameters.AddWithValue("@Name", appName);
-                int rows = cmd.ExecuteNonQuery();
-                if (rows == 0) return NotFound();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@Name", appName);
+                    rows = cmd.ExecuteNonQuery();
+                }
             }
-            return Ok($"Application '{appName}' deleted.");
+
+            if (rows == 0) return NotFound();
+            return Ok($"Aplicação '{appName}' apagada.");
         }
 
         // =============================================================
-        // 2. CONTAINERS
+        // 2.(Containers)
         // =============================================================
 
+        // POST: api/somiod/{appName} Criar Contentor
         [HttpPost]
         [Route("{appName}")]
         public IHttpActionResult CreateContainer(string appName, [FromBody] Container container)
         {
-            if (container == null || container.ResType != "container") return BadRequest();
+            if (container == null) return BadRequest();
+            if (container.ResType != "container") return BadRequest("O 'res-type' deve ser 'container'.");
 
             int? appId = GetAppIdByName(appName);
             if (appId == null) return NotFound();
+
+            // 2. Inserir na DB (Tabela: Container)
+            string sql = "INSERT INTO Container (Name, ParentAppId) VALUES (@Name, @ParentId)";
 
             try
             {
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
                     conn.Open();
-                    string sql = "INSERT INTO Container (Name, ParentAppId) VALUES (@Name, @ParentId)";
-                    SqlCommand cmd = new SqlCommand(sql, conn);
-                    cmd.Parameters.AddWithValue("@Name", container.ResourceName);
-                    cmd.Parameters.AddWithValue("@ParentId", appId);
-                    cmd.ExecuteNonQuery();
+                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@Name", container.ResourceName);
+                        cmd.Parameters.AddWithValue("@ParentId", appId);
+                        cmd.ExecuteNonQuery();
+                    }
                 }
             }
             catch (SqlException ex)
             {
-                if (ex.Number == 2627) return Content(HttpStatusCode.Conflict, "Container exists.");
+                if (ex.Number == 2627) return Content(HttpStatusCode.Conflict, "Já existe um contentor com esse nome nesta aplicação.");
                 return InternalServerError(ex);
             }
-            return Ok($"Container '{container.ResourceName}' created.");
+
+            return Ok($"Contentor '{container.ResourceName}' criado em '{appName}'.");
         }
 
+        // GET: api/somiod/{appName}/{containerName}
         [HttpGet]
         [Route("{appName}/{containerName}")]
         public IHttpActionResult GetContainer(string appName, string containerName)
         {
-            // Discovery Logic
-            if (Request.Headers.TryGetValues("somiod-discovery", out var headerValues))
+            // Discovery (Listar Filhos)
+            IEnumerable<string> headerValues;
+            if (Request.Headers.TryGetValues("somiod-discovery", out headerValues))
             {
                 string disc = string.Join(",", headerValues);
                 if (disc == "content-instance" || disc == "subscription")
                 {
                     var children = new List<string>();
                     string table = (disc == "content-instance") ? "ContentInstance" : "Subscription";
-                    // Para subscrições, o path deve incluir /subs/ [cite: 54]
-                    string pathMid = (disc == "subscription") ? "/subs/" : "/";
 
-                    string sql = $@"SELECT R.Name FROM {table} R
-                                    JOIN Container C ON R.ParentContainerId = C.Id
-                                    JOIN Application A ON C.ParentAppId = A.Id
-                                    WHERE A.Name = @AppName AND C.Name = @ContName";
+                    string sqlDisc = $@"SELECT R.Name FROM {table} R
+                                        JOIN Container C ON R.ParentContainerId = C.Id
+                                        JOIN Application A ON C.ParentAppId = A.Id
+                                        WHERE A.Name = @AppName AND C.Name = @ContName";
 
                     using (SqlConnection conn = new SqlConnection(connectionString))
                     {
                         conn.Open();
-                        SqlCommand cmd = new SqlCommand(sql, conn);
-                        cmd.Parameters.AddWithValue("@AppName", appName);
-                        cmd.Parameters.AddWithValue("@ContName", containerName);
-                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
                         {
-                            while (reader.Read())
-                                children.Add($"/api/somiod/{appName}/{containerName}{pathMid}{reader["Name"]}");
+                            cmd.Parameters.AddWithValue("@AppName", appName);
+                            cmd.Parameters.AddWithValue("@ContName", containerName);
+                            using (SqlDataReader reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read()) children.Add(reader["Name"].ToString());
+                            }
                         }
                     }
                     return Ok(children);
                 }
             }
 
-            // Normal GET Container
+            // (Obter Contentor)
+            string sql = @"SELECT C.* FROM Container C
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName";
+
             Container cont = null;
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                string sql = @"SELECT C.* FROM Container C
-                               JOIN Application A ON C.ParentAppId = A.Id
-                               WHERE A.Name = @AppName AND C.Name = @ContName";
-                SqlCommand cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@AppName", appName);
-                cmd.Parameters.AddWithValue("@ContName", containerName);
-                using (SqlDataReader reader = cmd.ExecuteReader())
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
                 {
-                    if (reader.Read())
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
                     {
-                        cont = new Container
+                        if (reader.Read())
                         {
-                            ResourceName = reader["Name"].ToString(),
-                            CreationDateTime = Convert.ToDateTime(reader["CreationDate"]),
-                            ResType = "container"
-                        };
+                            cont = new Container
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                ResType = "container"
+                            };
+                        }
                     }
                 }
             }
+
             if (cont == null) return NotFound();
             return Ok(cont);
         }
 
+        // DELETE: api/somiod/{appName}/{containerName}
         [HttpDelete]
         [Route("{appName}/{containerName}")]
         public IHttpActionResult DeleteContainer(string appName, string containerName)
         {
+            // Apaga contentor
+            string sql = @"DELETE C FROM Container C
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName";
+
+            int rows = 0;
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                string sql = @"DELETE C FROM Container C
-                               JOIN Application A ON C.ParentAppId = A.Id
-                               WHERE A.Name = @AppName AND C.Name = @ContName";
-                SqlCommand cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@AppName", appName);
-                cmd.Parameters.AddWithValue("@ContName", containerName);
-                int rows = cmd.ExecuteNonQuery();
-                if (rows == 0) return NotFound();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+                    rows = cmd.ExecuteNonQuery();
+                }
             }
-            return Ok($"Container '{containerName}' deleted.");
+
+            if (rows == 0) return NotFound();
+            return Ok($"Contentor '{containerName}' apagado.");
         }
 
         // =============================================================
-        // 3. RESOURCES (ContentInstance & Subscription)
+        // 3.(ContentInstance & Subscription)
         // =============================================================
 
+        // POST: api/somiod/{appName}/{containerName}
         [HttpPost]
         [Route("{appName}/{containerName}")]
         public IHttpActionResult CreateResource(string appName, string containerName, [FromBody] Newtonsoft.Json.Linq.JObject body)
         {
+            if (body == null) return BadRequest();
+
             string resType = (string)body["res-type"];
+            if (string.IsNullOrEmpty(resType)) return BadRequest("Falta propriedade 'res-type'.");
+
             int? contId = GetContainerIdByName(appName, containerName);
             if (contId == null) return NotFound();
 
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
+
                 if (resType == "content-instance")
                 {
+                    // Converter para Modelo ContentInstance
                     var instance = body.ToObject<ContentInstance>();
-                    // Garantir nome único se vazio [cite: 83]
+
+                    // [MQTT] Garantia de nome único se não for fornecido (necessário para notificação correta)
                     if (string.IsNullOrEmpty(instance.ResourceName)) instance.ResourceName = Guid.NewGuid().ToString();
 
-                    string sql = "INSERT INTO ContentInstance (Name, Content, ContentType, ParentContainerId) VALUES (@Name, @Content, @Type, @ParentId)";
-                    SqlCommand cmd = new SqlCommand(sql, conn);
-                    cmd.Parameters.AddWithValue("@Name", instance.ResourceName);
-                    cmd.Parameters.AddWithValue("@Content", instance.Content);
-                    cmd.Parameters.AddWithValue("@Type", instance.ContentType ?? "text/plain");
-                    cmd.Parameters.AddWithValue("@ParentId", contId);
-                    cmd.ExecuteNonQuery();
+                    if (string.IsNullOrEmpty(instance.Content))
+                        return BadRequest("Content é obrigatório.");
 
-                    // NOTIFICAÇÃO MQTT - EVENTO 1 (Creation) [cite: 58]
+                    string sql = "INSERT INTO ContentInstance (Name, Content, ContentType, ParentContainerId) VALUES (@Name, @Content, @Type, @ParentId)";
+
+                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@Name", instance.ResourceName);
+                        cmd.Parameters.AddWithValue("@Content", instance.Content);
+                        cmd.Parameters.AddWithValue("@Type", instance.ContentType ?? "text/plain");
+                        cmd.Parameters.AddWithValue("@ParentId", contId);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    // [MQTT] BLOCO ADICIONADO: Dispara notificação de Evento 1 (Criação) para o Broker
                     NotifySubscribers((int)contId, appName, containerName, instance.ResourceName, instance.Content, 1);
 
-                    return Ok($"Content-Instance '{instance.ResourceName}' created.");
+                    return Ok($"Dado '{instance.ResourceName}' criado.");
                 }
                 else if (resType == "subscription")
                 {
+                    // Converter para Modelo Subscription
                     var sub = body.ToObject<Subscription>();
+
+                    if (sub.Evt != 1 && sub.Evt != 2) return BadRequest("Evento deve ser 1 ou 2.");
+                    if (string.IsNullOrEmpty(sub.Endpoint)) return BadRequest("Endpoint obrigatório.");
+
                     string sql = "INSERT INTO Subscription (Name, EventId, Endpoint, ParentContainerId) VALUES (@Name, @Event, @Endpoint, @ParentId)";
+
                     try
                     {
-                        SqlCommand cmd = new SqlCommand(sql, conn);
-                        cmd.Parameters.AddWithValue("@Name", sub.ResourceName);
-                        cmd.Parameters.AddWithValue("@Event", sub.Evt);
-                        cmd.Parameters.AddWithValue("@Endpoint", sub.Endpoint);
-                        cmd.Parameters.AddWithValue("@ParentId", contId);
-                        cmd.ExecuteNonQuery();
-                        return Ok($"Subscription '{sub.ResourceName}' created.");
+                        using (SqlCommand cmd = new SqlCommand(sql, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@Name", sub.ResourceName);
+                            cmd.Parameters.AddWithValue("@Event", sub.Evt);
+                            cmd.Parameters.AddWithValue("@Endpoint", sub.Endpoint);
+                            cmd.Parameters.AddWithValue("@ParentId", contId);
+                            cmd.ExecuteNonQuery();
+                        }
+                        return Ok($"Subscrição '{sub.ResourceName}' criada.");
                     }
-                    catch (SqlException) { return Conflict(); }
+                    catch (SqlException ex)
+                    {
+                        if (ex.Number == 2627 || ex.Number == 2601)
+                        {
+                            return Content(HttpStatusCode.Conflict, $"A subscrição '{sub.ResourceName}' já existe neste contentor.");
+                        }
+                        return InternalServerError(ex);
+                    }
                 }
             }
-            return BadRequest("Unknown res-type.");
+
+            return BadRequest("Tipo de recurso desconhecido.");
         }
 
-        // DELETE CONTENT-INSTANCE
+        // DELETE: api/somiod/{appName}/{containerName}/{resourceName}
         [HttpDelete]
         [Route("{appName}/{containerName}/{resourceName}")]
         public IHttpActionResult DeleteContentInstance(string appName, string containerName, string resourceName)
         {
+            // [MQTT] Precisamos do ID do contentor para buscar subscrições antes de apagar (ou logo após)
             int? contId = GetContainerIdByName(appName, containerName);
             if (contId == null) return NotFound();
 
+            string sql = @"DELETE R FROM ContentInstance R
+                           JOIN Container C ON R.ParentContainerId = C.Id
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName AND R.Name = @ResName";
+
+            int rows = 0;
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                string sql = @"DELETE R FROM ContentInstance R
-                               JOIN Container C ON R.ParentContainerId = C.Id
-                               JOIN Application A ON C.ParentAppId = A.Id
-                               WHERE A.Name = @AppName AND C.Name = @ContName AND R.Name = @ResName";
-                SqlCommand cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@AppName", appName);
-                cmd.Parameters.AddWithValue("@ContName", containerName);
-                cmd.Parameters.AddWithValue("@ResName", resourceName);
-                int rows = cmd.ExecuteNonQuery();
-
-                if (rows > 0)
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
                 {
-                    // NOTIFICAÇÃO MQTT - EVENTO 2 (Deletion) [cite: 58]
-                    NotifySubscribers((int)contId, appName, containerName, resourceName, "DELETED", 2);
-                    return Ok("Deleted");
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+                    cmd.Parameters.AddWithValue("@ResName", resourceName);
+                    rows = cmd.ExecuteNonQuery();
                 }
             }
+
+            // [MQTT] Lógica adicionada: Se apagou algo com sucesso, notifica Evento 2 (Deletion)
+            if (rows > 0)
+            {
+                NotifySubscribers((int)contId, appName, containerName, resourceName, "DELETED", 2);
+                return Ok("Deleted");
+            }
+
             return NotFound();
         }
 
         // =============================================================
-        // 4. ROTAS ESPECÍFICAS PARA SUBSCRIPTIONS (/subs/)
+        // MÉTODOS AUXILIARES
         // =============================================================
-
-        [HttpGet]
-        [Route("{appName}/{containerName}/subs/{subName}")]
-        public IHttpActionResult GetSubscription(string appName, string containerName, string subName)
-        {
-            Subscription sub = null;
-            using (SqlConnection conn = new SqlConnection(connectionString))
-            {
-                conn.Open();
-                string sql = @"SELECT S.* FROM Subscription S
-                               JOIN Container C ON S.ParentContainerId = C.Id
-                               JOIN Application A ON C.ParentAppId = A.Id
-                               WHERE A.Name = @AppName AND C.Name = @ContName AND S.Name = @SubName";
-                SqlCommand cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@AppName", appName);
-                cmd.Parameters.AddWithValue("@ContName", containerName);
-                cmd.Parameters.AddWithValue("@SubName", subName);
-                using (SqlDataReader reader = cmd.ExecuteReader())
-                {
-                    if (reader.Read())
-                    {
-                        sub = new Subscription
-                        {
-                            ResourceName = reader["Name"].ToString(),
-                            Evt = (int)reader["EventId"],
-                            Endpoint = reader["Endpoint"].ToString(),
-                            ResType = "subscription",
-                            CreationDateTime = Convert.ToDateTime(reader["CreationDate"])
-                        };
-                    }
-                }
-            }
-            if (sub == null) return NotFound();
-            return Ok(sub);
-        }
-
-        [HttpDelete]
-        [Route("{appName}/{containerName}/subs/{subName}")]
-        public IHttpActionResult DeleteSubscription(string appName, string containerName, string subName)
-        {
-            using (SqlConnection conn = new SqlConnection(connectionString))
-            {
-                conn.Open();
-                string sql = @"DELETE S FROM Subscription S
-                               JOIN Container C ON S.ParentContainerId = C.Id
-                               JOIN Application A ON C.ParentAppId = A.Id
-                               WHERE A.Name = @AppName AND C.Name = @ContName AND S.Name = @SubName";
-                SqlCommand cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@AppName", appName);
-                cmd.Parameters.AddWithValue("@ContName", containerName);
-                cmd.Parameters.AddWithValue("@SubName", subName);
-                int rows = cmd.ExecuteNonQuery();
-                if (rows == 0) return NotFound();
-            }
-            return Ok($"Subscription '{subName}' deleted.");
-        }
-
-        // =============================================================
-        // HELPERS & MQTT ENGINE
-        // =============================================================
-
         private int? GetAppIdByName(string name)
         {
             using (SqlConnection conn = new SqlConnection(connectionString))
@@ -435,12 +471,13 @@ namespace SOMIOD_API.Controllers
 
         private int? GetContainerIdByName(string appName, string contName)
         {
+            string sql = @"SELECT C.Id FROM Container C 
+                           JOIN Application A ON C.ParentAppId = A.Id 
+                           WHERE A.Name = @AppName AND C.Name = @ContName";
+
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                string sql = @"SELECT C.Id FROM Container C 
-                               JOIN Application A ON C.ParentAppId = A.Id 
-                               WHERE A.Name = @AppName AND C.Name = @ContName";
                 SqlCommand cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@AppName", appName);
                 cmd.Parameters.AddWithValue("@ContName", contName);
@@ -450,15 +487,15 @@ namespace SOMIOD_API.Controllers
             return null;
         }
 
+        // [MQTT] MÉTODO NOVO: Responsável por encontrar subscritores e montar o XML de notificação
         private void NotifySubscribers(int containerId, string appName, string containerName, string resourceName, string contentVal, int eventType)
         {
-            // 1. Obter endpoints subscritos
             var endpoints = new List<string>();
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 conn.Open();
-                // Verifica se a subscrição quer saber deste evento (Creation=1 ou Deletion=2)
-                string sql = "SELECT Endpoint FROM Subscription WHERE ParentContainerId = @ParentId AND (EventId = @Evt OR EventId = 0)"; // EventId 0 could mean 'Both' if implemented
+                // Verifica quem subscreveu a este tipo de evento (1 ou 2)
+                string sql = "SELECT Endpoint FROM Subscription WHERE ParentContainerId = @ParentId AND EventId = @Evt";
                 SqlCommand cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@ParentId", containerId);
                 cmd.Parameters.AddWithValue("@Evt", eventType);
@@ -470,7 +507,7 @@ namespace SOMIOD_API.Controllers
 
             if (endpoints.Count == 0) return;
 
-            // 2. Construir XML de notificação [cite: 58, 93]
+            // Cria o XML que a aplicação Windows Forms espera
             XElement xmlMsg = new XElement("Notification",
                 new XElement("Event", eventType == 1 ? "Creation" : "Deletion"),
                 new XElement("Resource", resourceName),
@@ -481,7 +518,7 @@ namespace SOMIOD_API.Controllers
             string payload = xmlMsg.ToString();
             string topic = $"api/somiod/{appName}/{containerName}";
 
-            // 3. Disparar MQTT
+            // Envia para cada endpoint MQTT encontrado
             foreach (var ep in endpoints)
             {
                 if (ep.ToLower().StartsWith("mqtt://"))
@@ -499,6 +536,7 @@ namespace SOMIOD_API.Controllers
             }
         }
 
+        // [MQTT] MÉTODO NOVO: Responsável pela conexão e publicação assíncrona no Broker
         private async Task PublishMqttAsync(string ip, int port, string topic, string payload)
         {
             try
