@@ -110,7 +110,7 @@ namespace IS_SOMIOD
             await CreateResource("container", APP_NAME, "zona-y");
             await CreateResource("container", APP_NAME, "semaforo");
 
-            // Subscreve ao contentor 'semaforo' para ouvir mudanças (criadas por App B ou lógica interna)
+       
             // O endpoint deve apontar para o broker MQTT local
             await CreateSubscription("semaforo", "sub-app-main", $"mqtt://{MQTT_BROKER}:{MQTT_PORT}", 1);
         }
@@ -266,14 +266,10 @@ namespace IS_SOMIOD
         private async void btnMenos1_Click(object sender, EventArgs e)
         {
             var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
-            if (slot == null) return; // Vazio
+            if (slot == null) return; 
 
             slot.BackColor = FreeColor;
-            // Apaga do middleware (simula saída)
-            // Se guardou o nome do recurso no botão (Tag ou Name), use-o. 
-            // Senão, estamos apenas a simular o evento.
-            // Aqui assumimos que apagamos um recurso dummy ou genérico se não tivermos ID.
-            // Para simplificar a demo, enviamos um evento "saiu" se não tivermos o ID exato para Delete.
+
             await SendDataAsync("zona-y", "saiu");
 
             CheckAndUpdateSemaforo();
