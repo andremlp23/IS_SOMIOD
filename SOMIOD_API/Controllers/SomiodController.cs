@@ -1,10 +1,11 @@
-﻿using System;
+﻿using SOMIOD_API.Models;
+using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data.SqlClient;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Web.Http;
-using SOMIOD_API.Models;
 
 namespace SOMIOD_API.Controllers
 {
@@ -18,9 +19,9 @@ namespace SOMIOD_API.Controllers
             connectionString = ConfigurationManager.ConnectionStrings["SomiodConnStr"].ConnectionString;
         }
 
-        // =============================================================
+        // ============================
         // 1. APLICAÇÕES (Applications)
-        // =============================================================
+        // ============================
 
         // POST: api/somiod
         [HttpPost]
@@ -33,22 +34,41 @@ namespace SOMIOD_API.Controllers
             // Se não houver nome, gera um.
             if (string.IsNullOrEmpty(app.ResourceName))
             {
-                app.ResourceName = "app-" + Guid.NewGuid().ToString().Substring(0, 8);
+                string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+                app.ResourceName = "app-" + timestamp;
             }
 
             string finalName = app.ResourceName;
-            string sql = "INSERT INTO Application (Name) VALUES (@Name)";
+
+            string sql = @"INSERT INTO Application (Name) VALUES (@Name);
+                           SELECT Id, Name, CreationDate FROM Application WHERE Id = SCOPE_IDENTITY();";
+
+            Application createdApp = null;
 
             bool inserted = ExecuteSqlWithRetry(sql, (cmd, name) =>
             {
                 cmd.Parameters.AddWithValue("@Name", name);
+
+                // Dados retornados pelo SELECT
+                // Nota: A execução acontece AQUI dentro da lambda
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        createdApp = new Application
+                        {
+                            ResourceName = (string)reader["Name"],
+                            CreationDateTime = (DateTime)reader["CreationDate"],
+                            ResType = "application"
+                        };
+                    }
+                }
             }, ref finalName);
 
             if (!inserted) return InternalServerError();
+            if (createdApp == null) return InternalServerError();
 
-            // Devolver o objeto completo
-            app.ResourceName = finalName;
-            return Ok(app);
+            return Ok(createdApp);
         }
 
         // GET: api/somiod (Discovery de Aplicações)
@@ -179,21 +199,43 @@ namespace SOMIOD_API.Controllers
 
             // Auto-naming se vazio
             if (string.IsNullOrEmpty(container.ResourceName))
-                container.ResourceName = "cont-" + Guid.NewGuid().ToString().Substring(0, 8);
-
+            {
+                string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+                container.ResourceName = "cont-" + timestamp;
+            }
+                
             string finalName = container.ResourceName;
-            string sql = "INSERT INTO Container (Name, ParentAppId) VALUES (@Name, @ParentId)";
+
+            // INSERT e depois SELECT para obter o registo completo
+            string sql = @"INSERT INTO Container (Name, ParentAppId) VALUES (@Name, @ParentId);
+                           SELECT Id, Name, CreationDate, ParentAppId FROM Container WHERE Id = SCOPE_IDENTITY();";
+
+            Container createdContainer = null;
 
             bool inserted = ExecuteSqlWithRetry(sql, (cmd, name) =>
             {
                 cmd.Parameters.AddWithValue("@Name", name);
                 cmd.Parameters.AddWithValue("@ParentId", appId);
+
+                // Dados retornados pelo SELECT
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        createdContainer = new Container
+                        {
+                            ResourceName = (string)reader["Name"],
+                            CreationDateTime = (DateTime)reader["CreationDate"],
+                            ResType = "container"
+                        };
+                    }
+                }
             }, ref finalName);
 
             if (!inserted) return InternalServerError();
+            if (createdContainer == null) return InternalServerError();
 
-            container.ResourceName = finalName;
-            return Ok(container);
+            return Ok(createdContainer);
         }
 
         // GET: api/somiod/{appName}/{containerName}
@@ -314,26 +356,44 @@ namespace SOMIOD_API.Controllers
                 if (string.IsNullOrEmpty(instance.Content) || string.IsNullOrEmpty(instance.ContentType))
                     return BadRequest("Content e ContentType obrigatórios.");
 
-                if (string.IsNullOrEmpty(instance.ResourceName))
-                    instance.ResourceName = "ci-" + Guid.NewGuid().ToString().Substring(0, 8);
-
+                if (string.IsNullOrEmpty(instance.ResourceName)){
+                    string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+                    instance.ResourceName = "ci-" + timestamp;
+                }
+                    
                 string finalName = instance.ResourceName;
-                string sql = "INSERT INTO ContentInstance (Name, Content, ContentType, ParentContainerId) VALUES (@Name, @Content, @Type, @ParentId)";
+
+                string sql = @"INSERT INTO ContentInstance (Name, Content, ContentType, ParentContainerId) VALUES (@Name, @Content, @Type, @ParentId);
+                               SELECT Id, Name, CreationDate, Content, ContentType, ParentContainerId FROM ContentInstance WHERE Id = SCOPE_IDENTITY();";
+
+                ContentInstance createdInstance = null;
 
                 bool inserted = ExecuteSqlWithRetry(sql, (cmd, name) => {
                     cmd.Parameters.AddWithValue("@Name", name);
                     cmd.Parameters.AddWithValue("@Content", instance.Content);
                     cmd.Parameters.AddWithValue("@Type", instance.ContentType);
                     cmd.Parameters.AddWithValue("@ParentId", contId);
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            createdInstance = new ContentInstance
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                Content = (string)reader["Content"],
+                                ContentType = (string)reader["ContentType"],
+                                ResType = "content-instance"
+                            };
+                        }
+                    }
                 }, ref finalName);
 
                 if (!inserted) return InternalServerError();
+                if (createdInstance == null) return InternalServerError();
 
-                instance.ResourceName = finalName;
-
-                // TODO: Verificar se há subscrições (Event Creation = 1) e disparar notificações (MQTT/HTTP)
-
-                return Ok(instance);
+                return Ok(createdInstance);
             }
             else if (resType == "subscription")
             {
@@ -342,22 +402,45 @@ namespace SOMIOD_API.Controllers
                 if (string.IsNullOrEmpty(sub.Endpoint)) return BadRequest("Endpoint obrigatório.");
 
                 if (string.IsNullOrEmpty(sub.ResourceName))
-                    sub.ResourceName = "sub-" + Guid.NewGuid().ToString().Substring(0, 8);
+                {
+                    string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+                    sub.ResourceName = "sub-" + timestamp;
+                }
+                    
 
                 string finalName = sub.ResourceName;
-                string sql = "INSERT INTO Subscription (Name, EventId, Endpoint, ParentContainerId) VALUES (@Name, @Event, @Endpoint, @ParentId)";
+
+                string sql = @"INSERT INTO Subscription (Name, EventId, Endpoint, ParentContainerId) VALUES (@Name, @Event, @Endpoint, @ParentId);
+                               SELECT Id, Name, CreationDate, EventId, Endpoint, ParentContainerId FROM Subscription WHERE Id = SCOPE_IDENTITY();";
+
+                Subscription createdSub = null;
 
                 bool inserted = ExecuteSqlWithRetry(sql, (cmd, name) => {
                     cmd.Parameters.AddWithValue("@Name", name);
                     cmd.Parameters.AddWithValue("@Event", sub.Evt);
                     cmd.Parameters.AddWithValue("@Endpoint", sub.Endpoint);
                     cmd.Parameters.AddWithValue("@ParentId", contId);
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            createdSub = new Subscription
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                Evt = (int)reader["EventId"],
+                                Endpoint = (string)reader["Endpoint"],
+                                ResType = "subscription"
+                            };
+                        }
+                    }
                 }, ref finalName);
 
                 if (!inserted) return InternalServerError();
+                if (createdSub == null) return InternalServerError();
 
-                sub.ResourceName = finalName;
-                return Ok(sub);
+                return Ok(createdSub);
             }
 
             return BadRequest("Tipo de recurso desconhecido.");
@@ -392,12 +475,12 @@ namespace SOMIOD_API.Controllers
             return Ok($"Dado '{resourceName}' apagado.");
         }
 
-        // =============================
-        // MÉTODOS AUXILIARES E PRIVADOS
-        // =============================
+        // ==================
+        // MÉTODOS AUXILIARES
+        // ==================
 
         // Método genérico para Inserir com Retry e Timestamp
-        private bool ExecuteSqlWithRetry(string sql, Action<SqlCommand, string> configureParams, ref string finalName)
+        private bool ExecuteSqlWithRetry(string sql, Action<SqlCommand, string> configureAndExecute, ref string finalName)
         {
             string originalName = finalName;
             try
@@ -407,8 +490,8 @@ namespace SOMIOD_API.Controllers
                     conn.Open();
                     using (SqlCommand cmd = new SqlCommand(sql, conn))
                     {
-                        configureParams(cmd, finalName);
-                        cmd.ExecuteNonQuery();
+                        // Chama a ação que configura os parâmetros E executa o comando (ExecuteReader)
+                        configureAndExecute(cmd, finalName);
                     }
                 }
                 return true;
@@ -427,8 +510,7 @@ namespace SOMIOD_API.Controllers
                             connRetry.Open();
                             using (SqlCommand cmdRetry = new SqlCommand(sql, connRetry))
                             {
-                                configureParams(cmdRetry, finalName);
-                                cmdRetry.ExecuteNonQuery();
+                                configureAndExecute(cmdRetry, finalName);
                             }
                         }
                         return true;
