@@ -3,11 +3,12 @@ using MQTTnet.Client;
 using MQTTnet.Client.Options;
 using System;
 using System.Drawing;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml.Linq; 
+using System.Xml.Linq;
 
 namespace IS_SOMIOD
 {
@@ -17,6 +18,12 @@ namespace IS_SOMIOD
         private IMqttClient _mqttClient;
         private const string BROKER_IP = "127.0.0.1";
         private const int BROKER_PORT = 1883;
+
+        private const string API_BASE = "http://localhost:62056/";
+        private const string APP_NAME = "smart-dock";
+
+        // Estado local das luzes (começamos com true/ligadas)
+        private bool _lightsOn = true;
 
         // Subscreve a TUDO o que acontece na aplicação smart-dock usando o wildcard '#'
         private const string TOPIC_WILDCARD = "api/somiod/smart-dock/#";
@@ -196,9 +203,67 @@ namespace IS_SOMIOD
 
         }
 
-        private void btnLuzes_Click(object sender, EventArgs e)
+        private async void btnLuzes_Click(object sender, EventArgs e)
         {
+            // 1. Alterna o estado
+            _lightsOn = !_lightsOn;
+            string command = _lightsOn ? "ON" : "OFF";
 
+            // 2. Atualiza texto do botão (feedback visual imediato na dashboard)
+            btnLuzes.Text = _lightsOn ? "Desligar Luzes" : "Ligar Luzes";
+
+            // 3. Envia para a API (que vai disparar o MQTT para o cliente)
+            string contentXml = $"<cmd>{command}</cmd>";
+            bool sucesso = await SendCommandToApi("luzes", contentXml);
+
+            if (sucesso)
+                InvokeLog($"Comando Luzes enviado: {command}");
+            else
+                InvokeLog("Erro ao enviar comando de luzes.");
+        }
+
+        private async Task<bool> SendCommandToApi(string container, string content)
+        {
+            using (var client = new HttpClient())
+            {
+                client.BaseAddress = new Uri(API_BASE);
+
+                // Construção do JSON manual
+                string jsonBody = "{" +
+                    "\"res-type\": \"content-instance\"," +
+                    $"\"resource-name\": \"cmd-{DateTime.Now.Ticks}\"," +
+                    $"\"content\": \"{content}\"," +
+                    "\"content-type\": \"application/xml\"" +
+                    "}";
+
+                var httpContent = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+
+                try
+                {
+                    // [CORREÇÃO] Construímos o caminho COMPLETO aqui para evitar erros
+                    // URL Final: http://localhost:62056/api/somiod/smart-dock/luzes
+                    string endpoint = $"api/somiod/{APP_NAME}/{container}";
+
+                    var response = await client.PostAsync(endpoint, httpContent);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        // Mostra o erro detalhado se falhar
+                        string errorMsg = await response.Content.ReadAsStringAsync();
+                        InvokeLog($"ERRO API [{response.StatusCode}]: {errorMsg}");
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    InvokeLog("EXCEPTION: " + ex.Message);
+                    return false;
+                }
+            }
         }
     }
 }

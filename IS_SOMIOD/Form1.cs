@@ -252,6 +252,29 @@ namespace IS_SOMIOD
                                 }
                             }
                             break;
+                            case "luzes":
+                            if (!string.IsNullOrEmpty(content))
+                                {
+                                    // Executa na thread da UI
+                                    this.BeginInvoke(new Action(() =>
+                                    {
+                                        if (content.Contains("OFF"))
+                                        {
+                                            // Modo Noite (Fundo Escuro, Texto Claro)
+                                            this.BackColor = Color.FromArgb(40, 40, 40); // Cinza escuro
+                                            this.ForeColor = Color.White;
+
+                                            // Opcional: Ajustar cor dos labels se necessário
+                                        }
+                                        else if (content.Contains("ON"))
+                                        {
+                                            // Modo Dia (Reset às cores originais)
+                                            this.BackColor = SystemColors.Control; // Cor padrão do Windows
+                                            this.ForeColor = SystemColors.ControlText;
+                                        }
+                                    }));
+                                }
+                            break;
                     }
                      }
                 catch
