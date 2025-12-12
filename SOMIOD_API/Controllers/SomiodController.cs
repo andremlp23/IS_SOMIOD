@@ -113,11 +113,10 @@ namespace SOMIOD_API.Controllers
                 }
             }
 
-            // Discovery de Containers (NOVO BLOCO)
+            // Discovery de Containers
             if (IsDiscoveryRequest("container"))
             {
                 var containers = new List<string>();
-                // Query para buscar TODOS os contentores e construir o path completo
                 // Path: /api/somiod/{appName}/{containerName}
                 string sqlDisc = @"
                     SELECT C.Name AS ContainerName, A.Name AS AppName
@@ -308,7 +307,6 @@ namespace SOMIOD_API.Controllers
                         {
                             app = new Application
                             {
-                                Id = (int)reader["Id"],
                                 ResourceName = (string)reader["Name"],
                                 CreationDateTime = (DateTime)reader["CreationDate"],
                                 ResType = "application"
