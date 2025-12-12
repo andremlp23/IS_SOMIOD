@@ -76,6 +76,115 @@ namespace SOMIOD_API.Controllers
         [Route("")]
         public IHttpActionResult GetApplicationsList()
         {
+            // --- DISCOVERY GLOBAL (Recursivo a partir da Raiz) ---
+
+            // Discovery de ContentInstances
+            if (IsDiscoveryRequest("content-instance"))
+            {
+                var instances = new List<string>();
+                string sqlDisc = @"
+                    SELECT CI.Name AS InstanceName, C.Name AS ContainerName, A.Name AS AppName
+                    FROM ContentInstance CI
+                    JOIN Container C ON CI.ParentContainerId = C.Id
+                    JOIN Application A ON C.ParentAppId = A.Id";
+
+                try
+                {
+                    using (SqlConnection conn = new SqlConnection(connectionString))
+                    {
+                        conn.Open();
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string appName = reader["AppName"].ToString();
+                                string contName = reader["ContainerName"].ToString();
+                                string instName = reader["InstanceName"].ToString();
+                                instances.Add($"/api/somiod/{appName}/{contName}/{instName}");
+                            }
+                        }
+                    }
+                    return Ok(instances);
+                }
+                catch (Exception ex)
+                {
+                    return InternalServerError(ex);
+                }
+            }
+
+            // Discovery de Containers (NOVO BLOCO)
+            if (IsDiscoveryRequest("container"))
+            {
+                var containers = new List<string>();
+                // Query para buscar TODOS os contentores e construir o path completo
+                // Path: /api/somiod/{appName}/{containerName}
+                string sqlDisc = @"
+                    SELECT C.Name AS ContainerName, A.Name AS AppName
+                    FROM Container C
+                    JOIN Application A ON C.ParentAppId = A.Id";
+
+                try
+                {
+                    using (SqlConnection conn = new SqlConnection(connectionString))
+                    {
+                        conn.Open();
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string appName = reader["AppName"].ToString();
+                                string contName = reader["ContainerName"].ToString();
+                                containers.Add($"/api/somiod/{appName}/{contName}");
+                            }
+                        }
+                    }
+                    return Ok(containers);
+                }
+                catch (Exception ex)
+                {
+                    return InternalServerError(ex);
+                }
+            }
+
+            // Discovery de Subscriptions
+            if (IsDiscoveryRequest("subscription"))
+            {
+                var subs = new List<string>();
+                string sqlDisc = @"
+                    SELECT S.Name AS SubName, C.Name AS ContainerName, A.Name AS AppName
+                    FROM Subscription S
+                    JOIN Container C ON S.ParentContainerId = C.Id
+                    JOIN Application A ON C.ParentAppId = A.Id";
+
+                try
+                {
+                    using (SqlConnection conn = new SqlConnection(connectionString))
+                    {
+                        conn.Open();
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string appName = reader["AppName"].ToString();
+                                string contName = reader["ContainerName"].ToString();
+                                string subName = reader["SubName"].ToString();
+
+                                subs.Add($"/api/somiod/{appName}/{contName}/subs/{subName}");
+                            }
+                        }
+                    }
+                    return Ok(subs);
+                }
+                catch (Exception ex)
+                {
+                    return InternalServerError(ex);
+                }
+            }
+
+            // --- NORMAL GET (Lista de Aplicações) ---
             var apps = new List<string>();
             string sql = "SELECT Name FROM Application";
 
@@ -106,12 +215,47 @@ namespace SOMIOD_API.Controllers
         [Route("{appName}")]
         public IHttpActionResult GetApplication(string appName)
         {
-            if (IsDiscoveryRequest("container"))
+            // --- DISCOVERY ---
+            // Verifica se há header de discovery
+            string discoveryType = GetDiscoveryType();
+
+            if (!string.IsNullOrEmpty(discoveryType))
             {
-                var containers = new List<string>();
-                string sqlDisc = @"SELECT C.Name FROM Container C 
-                                   JOIN Application A ON C.ParentAppId = A.Id 
-                                   WHERE A.Name = @AppName";
+                var resources = new List<string>();
+                string sqlDisc = "";
+
+                // Discovery de CONTENTORES (Filhos diretos)
+                if (discoveryType == "container")
+                {
+                    sqlDisc = @"SELECT C.Name FROM Container C 
+                                JOIN Application A ON C.ParentAppId = A.Id 
+                                WHERE A.Name = @AppName";
+                }
+                // Discovery de CONTENT-INSTANCES (Recursivo: Netos)
+                else if (discoveryType == "content-instance")
+                {
+                    // Seleciona ContentInstances cujos Contentores pais pertencem à App
+                    sqlDisc = @"SELECT CI.Name, C.Name as ContainerName 
+                                FROM ContentInstance CI
+                                JOIN Container C ON CI.ParentContainerId = C.Id
+                                JOIN Application A ON C.ParentAppId = A.Id
+                                WHERE A.Name = @AppName";
+                }
+                // Discovery de SUBSCRIPTIONS (Recursivo: Netos)
+                else if (discoveryType == "subscription")
+                {
+                    // Seleciona Subscriptions cujos Contentores pais pertencem à App
+                    sqlDisc = @"SELECT S.Name, C.Name as ContainerName
+                                FROM Subscription S
+                                JOIN Container C ON S.ParentContainerId = C.Id
+                                JOIN Application A ON C.ParentAppId = A.Id
+                                WHERE A.Name = @AppName";
+                }
+                else
+                {
+                    // Tipo de discovery não suportado neste nível
+                    return BadRequest("Tipo de discovery inválido para nível de Aplicação.");
+                }
 
                 using (SqlConnection conn = new SqlConnection(connectionString))
                 {
@@ -123,15 +267,32 @@ namespace SOMIOD_API.Controllers
                         {
                             while (reader.Read())
                             {
-                                containers.Add($"/api/somiod/{appName}/{reader["Name"]}");
+                                string resName = reader["Name"].ToString();
+
+                                if (discoveryType == "container")
+                                {
+                                    resources.Add($"/api/somiod/{appName}/{resName}");
+                                }
+                                else if (discoveryType == "content-instance")
+                                {
+                                    // Path: /api/somiod/{appName}/{containerName}/{instanceName}
+                                    string contName = reader["ContainerName"].ToString();
+                                    resources.Add($"/api/somiod/{appName}/{contName}/{resName}");
+                                }
+                                else if (discoveryType == "subscription")
+                                {
+                                    // Path: /api/somiod/{appName}/{containerName}/subs/{subName}
+                                    string contName = reader["ContainerName"].ToString();
+                                    resources.Add($"/api/somiod/{appName}/{contName}/subs/{resName}");
+                                }
                             }
                         }
                     }
                 }
-                return Ok(containers);
+                return Ok(resources);
             }
 
-            // GET (Dados da App)
+            // --- NORMAL GET (Dados da App) ---
             Application app = null;
             string sql = "SELECT * FROM Application WHERE Name = @Name";
 
@@ -147,6 +308,7 @@ namespace SOMIOD_API.Controllers
                         {
                             app = new Application
                             {
+                                Id = (int)reader["Id"],
                                 ResourceName = (string)reader["Name"],
                                 CreationDateTime = (DateTime)reader["CreationDate"],
                                 ResType = "application"
@@ -243,42 +405,62 @@ namespace SOMIOD_API.Controllers
         [Route("{appName}/{containerName}")]
         public IHttpActionResult GetContainer(string appName, string containerName)
         {
-            // Discovery de filhos
-            if (IsDiscoveryRequest("content-instance") || IsDiscoveryRequest("subscription"))
+            // Discovery de filhos (Pode ser 'content-instance' ou 'subscription')
+            string discoveryType = GetDiscoveryType();
+
+            if (discoveryType == "content-instance" || discoveryType == "subscription")
             {
                 var children = new List<string>();
+                string sqlDisc = "";
 
-                string sqlDisc = @"
-                    SELECT 'ci' as Type, Name FROM ContentInstance WHERE ParentContainerId = (SELECT C.Id FROM Container C JOIN Application A ON C.ParentAppId = A.Id WHERE A.Name = @AppName AND C.Name = @ContName)
-                    UNION
-                    SELECT 'sub' as Type, Name FROM Subscription WHERE ParentContainerId = (SELECT C.Id FROM Container C JOIN Application A ON C.ParentAppId = A.Id WHERE A.Name = @AppName AND C.Name = @ContName)";
-
-                using (SqlConnection conn = new SqlConnection(connectionString))
+                if (discoveryType == "content-instance")
                 {
-                    conn.Open();
-                    using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@AppName", appName);
-                        cmd.Parameters.AddWithValue("@ContName", containerName);
-                        using (SqlDataReader reader = cmd.ExecuteReader())
-                        {
-                            while (reader.Read())
-                            {
-                                string type = reader["Type"].ToString();
-                                string name = reader["Name"].ToString();
+                    sqlDisc = @"SELECT Name FROM ContentInstance 
+                                WHERE ParentContainerId = (SELECT C.Id FROM Container C 
+                                                           JOIN Application A ON C.ParentAppId = A.Id 
+                                                           WHERE A.Name = @AppName AND C.Name = @ContName)";
+                }
+                else // subscription
+                {
+                    sqlDisc = @"SELECT Name FROM Subscription 
+                                WHERE ParentContainerId = (SELECT C.Id FROM Container C 
+                                                           JOIN Application A ON C.ParentAppId = A.Id 
+                                                           WHERE A.Name = @AppName AND C.Name = @ContName)";
+                }
 
-                                if (type == "sub")
-                                    children.Add($"/api/somiod/{appName}/{containerName}/subs/{name}");
-                                else
-                                    children.Add($"/api/somiod/{appName}/{containerName}/{name}");
+                try
+                {
+                    using (SqlConnection conn = new SqlConnection(connectionString))
+                    {
+                        conn.Open();
+                        using (SqlCommand cmd = new SqlCommand(sqlDisc, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@AppName", appName);
+                            cmd.Parameters.AddWithValue("@ContName", containerName);
+                            using (SqlDataReader reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read())
+                                {
+                                    string name = reader["Name"].ToString();
+
+                                    // Constrói o URL correto consoante o tipo
+                                    if (discoveryType == "subscription")
+                                        children.Add($"/api/somiod/{appName}/{containerName}/subs/{name}");
+                                    else
+                                        children.Add($"/api/somiod/{appName}/{containerName}/{name}");
+                                }
                             }
                         }
                     }
+                    return Ok(children);
                 }
-                return Ok(children);
+                catch (Exception ex)
+                {
+                    return InternalServerError(ex);
+                }
             }
 
-            // Normal GET
+            // Normal GET (Dados do Contentor)
             string sql = @"SELECT C.* FROM Container C
                            JOIN Application A ON C.ParentAppId = A.Id
                            WHERE A.Name = @AppName AND C.Name = @ContName";
@@ -472,7 +654,118 @@ namespace SOMIOD_API.Controllers
             }
 
             if (rows == 0) return NotFound();
-            return Ok($"Dado '{resourceName}' apagado.");
+            return Ok($"ContentInstance '{resourceName}' apagada.");
+        }
+
+        // GET ContentInstance
+        [HttpGet]
+        [Route("{appName}/{containerName}/{resourceName}")]
+        public IHttpActionResult GetContentInstance(string appName, string containerName, string resourceName)
+        {
+            string sql = @"SELECT R.* FROM ContentInstance R
+                           JOIN Container C ON R.ParentContainerId = C.Id
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName AND R.Name = @ResName";
+
+            ContentInstance ci = null;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+                    cmd.Parameters.AddWithValue("@ResName", resourceName);
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            ci = new ContentInstance
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                Content = (string)reader["Content"],
+                                ContentType = (string)reader["ContentType"],
+                                ResType = "content-instance"
+                            };
+                        }
+                    }
+                }
+            }
+
+            if (ci == null) return NotFound();
+            return Ok(ci);
+        }
+
+        // =====================
+        // SUBSCRIPTIONS (/subs)
+        // =====================
+
+        [HttpDelete]
+        [Route("{appName}/{containerName}/subs/{subName}")]
+        public IHttpActionResult DeleteSubscription(string appName, string containerName, string subName)
+        {
+            string sql = @"DELETE S FROM Subscription S
+                           JOIN Container C ON S.ParentContainerId = C.Id
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName AND S.Name = @SubName";
+
+            int rows = 0;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+                    cmd.Parameters.AddWithValue("@SubName", subName);
+                    rows = cmd.ExecuteNonQuery();
+                }
+            }
+
+            if (rows == 0) return NotFound();
+            return Ok($"Subscrição '{subName}' apagada.");
+        }
+
+        [HttpGet]
+        [Route("{appName}/{containerName}/subs/{subName}")]
+        public IHttpActionResult GetSubscription(string appName, string containerName, string subName)
+        {
+            string sql = @"SELECT S.* FROM Subscription S
+                           JOIN Container C ON S.ParentContainerId = C.Id
+                           JOIN Application A ON C.ParentAppId = A.Id
+                           WHERE A.Name = @AppName AND C.Name = @ContName AND S.Name = @SubName";
+
+            Subscription sub = null;
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    cmd.Parameters.AddWithValue("@ContName", containerName);
+                    cmd.Parameters.AddWithValue("@SubName", subName);
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            sub = new Subscription
+                            {
+                                ResourceName = (string)reader["Name"],
+                                CreationDateTime = (DateTime)reader["CreationDate"],
+                                Evt = (int)reader["EventId"],
+                                Endpoint = (string)reader["Endpoint"],
+                                ResType = "subscription"
+                            };
+                        }
+                    }
+                }
+            }
+
+            if (sub == null) return NotFound();
+            return Ok(sub);
         }
 
         // ==================
@@ -529,6 +822,15 @@ namespace SOMIOD_API.Controllers
                 return headerVal == type;
             }
             return false;
+        }
+
+        private string GetDiscoveryType()
+        {
+            if (Request.Headers.TryGetValues("somiod-discovery", out var values))
+            {
+                return string.Join(",", values);
+            }
+            return null;
         }
 
         private int? GetAppIdByName(string name)
