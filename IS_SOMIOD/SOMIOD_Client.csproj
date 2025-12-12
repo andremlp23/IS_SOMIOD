@@ -141,7 +141,7 @@
     <None Include="Resources\traffic-light.png" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Resources\box-truck.png" />
+    <None Include="Resources\box-truck.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets" Condition="Exists('..\packages\System.ValueTuple.4.6.1\build\net471\System.ValueTuple.targets')" />

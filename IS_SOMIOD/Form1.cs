@@ -25,7 +25,7 @@ namespace IS_SOMIOD
         private const string MQTT_BROKER = "127.0.0.1";
         private const int MQTT_PORT = 1883;
 
-        // [ALTERAÇÃO] Mudamos para Wildcard '#' para ouvir semáforo, zona-x e zona-y
+        // Receber tudo
         private const string MQTT_TOPIC_ALL = "api/somiod/smart-dock/#";
 
         // UI Arrays
@@ -35,16 +35,13 @@ namespace IS_SOMIOD
         private readonly Color FreeColor = Color.LightGreen;
         private readonly Color OccupiedColor = Color.IndianRed;
 
-
         public Form1()
         {
             InitializeComponent();
 
-            // Setup Buttons UI
             this.btnMais1.Click += btnMais1_Click;
             this.btnMenos1.Click += btnMenos1_Click;
 
-            // Certifique-se que estes botões existem no Designer
             zonaXSlots = new[] { btn1, btn2, btn3, btn4 };
             zonaYSlots = new[] { btn5, btn6, btn7, btn8 };
 
@@ -62,17 +59,13 @@ namespace IS_SOMIOD
 
             if (!exists)
             {
-                // Só cria se NÃO existir
                 await BootstrapAsync();
             }
             else
             {
-                // Mesmo que exista, garantimos que as subscrições estão lá 
-                // (opcional, mas bom para garantir que ouvimos zona-x e zona-y)
                 await EnsureSubscriptionsExist();
             }
 
-            // Em ambos os casos (existe ou acabou de criar)
             await StartMqttAsync();
         }
 
@@ -88,7 +81,9 @@ namespace IS_SOMIOD
             {
                 b.UseVisualStyleBackColor = false;
                 b.BackColor = FreeColor;
+                b.BackgroundImage = null; // LIMPA IMAGEM
             }
+
             btnSemaforo.UseVisualStyleBackColor = false;
             btnSemaforo.BackColor = FreeColor;
         }
@@ -110,7 +105,7 @@ namespace IS_SOMIOD
         }
 
         // ----------------------------------------------------
-        // API BOOTSTRAP (Criação da estrutura)
+        // API BOOTSTRAP
         // ----------------------------------------------------
         private async Task BootstrapAsync()
         {
@@ -127,15 +122,12 @@ namespace IS_SOMIOD
         {
             string endpoint = $"mqtt://{MQTT_BROKER}:{MQTT_PORT}";
 
-            // [ALTERAÇÃO] Criamos subscrições para TUDO, para podermos contar a lógica no cliente
             await CreateSubscription("semaforo", "sub-client1-semaforo", endpoint, 1);
             await CreateSubscription("zona-x", "sub-client1-zonax", endpoint, 1);
             await CreateSubscription("zona-y", "sub-client1-zonay", endpoint, 1);
             await CreateSubscription("luzes", "sub-client1-luzes", endpoint, 1);
-
         }
 
-        // Helper genérico para criar recursos
         private async Task CreateResource(string type, string parentPath, string name, string subEndpoint = null, int evt = 1)
         {
             var client = new RestClient(API_BASE);
@@ -159,10 +151,8 @@ namespace IS_SOMIOD
             try
             {
                 var resp = await client.ExecuteAsync(req);
-                if (!resp.IsSuccessful && resp.StatusCode != System.Net.HttpStatusCode.Conflict)
-                    System.Diagnostics.Debug.WriteLine($"Error creating {name}: {resp.Content}");
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            catch { }
         }
 
         private async Task CreateSubscription(string container, string name, string endpoint, int evt)
@@ -171,7 +161,7 @@ namespace IS_SOMIOD
         }
 
         // ----------------------------------------------------
-        // OPERAÇÕES LÓGICAS (Send Data / Delete)
+        // SEND DATA
         // ----------------------------------------------------
         private async Task<bool> SendDataAsync(string container, string content)
         {
@@ -191,20 +181,14 @@ namespace IS_SOMIOD
             return resp.IsSuccessful;
         }
 
-        private async Task DeleteFromContainerAsync(string container, string resourceName)
-        {
-            var client = new RestClient(API_BASE);
-            var req = new RestRequest($"{APP_NAME}/{container}/{resourceName}", Method.Delete);
-            await client.ExecuteAsync(req);
-        }
-
         // ----------------------------------------------------
-        // MQTT HANDLER (Parsing XML)
+        // MQTT HANDLER
         // ----------------------------------------------------
         private async Task StartMqttAsync()
         {
             var factory = new MqttFactory();
             mqttClient = factory.CreateMqttClient();
+
             var options = new MqttClientOptionsBuilder()
                 .WithClientId("Client_App_" + Guid.NewGuid())
                 .WithTcpServer(MQTT_BROKER, MQTT_PORT)
@@ -212,7 +196,6 @@ namespace IS_SOMIOD
 
             mqttClient.UseConnectedHandler(async e =>
             {
-                // [ALTERAÇÃO] Subscreve ao tópico Wildcard (#) para receber tudo
                 await mqttClient.SubscribeAsync(new MQTTnet.Client.Subscribing.MqttClientSubscribeOptionsBuilder()
                     .WithTopicFilter(MQTT_TOPIC_ALL)
                     .Build());
@@ -226,71 +209,62 @@ namespace IS_SOMIOD
                 {
                     XDocument doc = XDocument.Parse(payload);
 
-                    // Extrair dados do XML
                     string container = doc.Root.Element("Container")?.Value;
                     string content = doc.Root.Element("Content")?.Value;
                     string eventType = doc.Root.Element("Event")?.Value;
 
                     if (eventType != "Creation") return;
 
-
                     switch (container)
                     {
                         case "semaforo":
                             if (!string.IsNullOrEmpty(content))
                             {
-                                if (content.Contains("VERDE"))
+                                this.BeginInvoke(new Action(async () =>
                                 {
-                                    this.BeginInvoke(new Action(async () => {
+                                    if (content.Contains("VERDE"))
+                                    {
                                         SetSemaphoreColor(Color.LightGreen);
                                         await MoveOneTruckAsync();
-                                    }));
-                                }
-                                else if (content.Contains("VERMELHO"))
-                                {
-                                    this.BeginInvoke(new Action(() => SetSemaphoreColor(Color.IndianRed)));
-                                }
+                                    }
+                                    else if (content.Contains("VERMELHO"))
+                                    {
+                                        SetSemaphoreColor(Color.IndianRed);
+                                    }
+                                }));
                             }
                             break;
-                            case "luzes":
-                            if (!string.IsNullOrEmpty(content))
-                                {
-                                    // Executa na thread da UI
-                                    this.BeginInvoke(new Action(() =>
-                                    {
-                                        if (content.Contains("OFF"))
-                                        {
-                                            // Modo Noite (Fundo Escuro, Texto Claro)
-                                            this.BackColor = Color.FromArgb(40, 40, 40); // Cinza escuro
-                                            this.ForeColor = Color.White;
 
-                                            // Opcional: Ajustar cor dos labels se necessário
-                                        }
-                                        else if (content.Contains("ON"))
-                                        {
-                                            // Modo Dia (Reset às cores originais)
-                                            this.BackColor = SystemColors.Control; // Cor padrão do Windows
-                                            this.ForeColor = SystemColors.ControlText;
-                                        }
-                                    }));
-                                }
+                        case "luzes":
+                            if (!string.IsNullOrEmpty(content))
+                            {
+                                this.BeginInvoke(new Action(() =>
+                                {
+                                    if (content.Contains("OFF"))
+                                    {
+                                        this.BackColor = Color.FromArgb(40, 40, 40);
+                                        this.ForeColor = Color.White;
+                                    }
+                                    else if (content.Contains("ON"))
+                                    {
+                                        this.BackColor = SystemColors.Control;
+                                        this.ForeColor = SystemColors.ControlText;
+                                    }
+                                }));
+                            }
                             break;
                     }
-                     }
-                catch
-                {
-                    System.Diagnostics.Debug.WriteLine("Erro ao parsear XML MQTT: " + payload);
+
                 }
+                catch { }
             });
 
             await mqttClient.ConnectAsync(options, CancellationToken.None);
         }
 
         // ----------------------------------------------------
-        // LÓGICA DE MOVIMENTO
+        // MOVIMENTO
         // ----------------------------------------------------
-
-        // Entrada Manual (Zona X)
         private async void btnMais1_Click(object sender, EventArgs e)
         {
             btnMais1.Enabled = false;
@@ -300,10 +274,10 @@ namespace IS_SOMIOD
                 if (slot == null) return;
 
                 slot.BackColor = OccupiedColor;
+                slot.BackgroundImage = Properties.Resources.box_truck;
+                slot.BackgroundImageLayout = ImageLayout.Zoom;
 
-                // Envia dados para a API -> API envia MQTT -> Recebemos MQTT -> Switch case atualiza _countZonaX
                 await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
-
                 CheckAndUpdateSemaforo(force: true);
             }
             finally
@@ -312,45 +286,44 @@ namespace IS_SOMIOD
             }
         }
 
-        // Saída Manual (Zona Y)
         private async void btnMenos1_Click(object sender, EventArgs e)
         {
             var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
             if (slot == null) return;
 
             slot.BackColor = FreeColor;
+            slot.BackgroundImage = null;
 
             await SendDataAsync("zona-y", "saiu");
-
             CheckAndUpdateSemaforo();
         }
 
-        // Movimento Automático (X -> Y) quando Verde
         private async Task MoveOneTruckAsync()
         {
-
             var truckX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
             var freeY = zonaYSlots.FirstOrDefault(b => b.BackColor == FreeColor);
 
             if (truckX != null && freeY != null)
             {
                 truckX.BackColor = FreeColor;
-                await Task.Delay(500); // Animação
+                truckX.BackgroundImage = null;
+
+                await Task.Delay(500);
+
                 freeY.BackColor = OccupiedColor;
+                freeY.BackgroundImage = Properties.Resources.box_truck;
+                freeY.BackgroundImageLayout = ImageLayout.Zoom;
 
                 await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
-
                 CheckAndUpdateSemaforo(force: false);
             }
         }
 
         private async void CheckAndUpdateSemaforo(bool force = false)
         {
-            // 1. Calcula o estado desejado
             bool zonaYFull = zonaYSlots.All(b => b.BackColor == OccupiedColor);
             string novoComando = zonaYFull ? "<cmd>VERMELHO</cmd>" : "<cmd>VERDE</cmd>";
 
-            // 2. Verifica o estado ATUAL visual
             bool isAtualmenteVerde = btnSemaforo.BackColor == Color.LightGreen;
             bool queroVerde = !zonaYFull;
 
