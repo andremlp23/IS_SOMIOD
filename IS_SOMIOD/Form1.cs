@@ -53,7 +53,17 @@ namespace IS_SOMIOD
 
         private async void Form1_Load(object sender, EventArgs e)
         {
-            await BootstrapAsync();
+            InitializeDefaultColors();
+
+            bool exists = await ApplicationExistsAsync(APP_NAME);
+
+            if (!exists)
+            {
+                // Só cria se NÃO existir
+                await BootstrapAsync();
+            }
+
+            // Em ambos os casos (existe ou acabou de criar)
             await StartMqttAsync();
         }
 
@@ -72,6 +82,22 @@ namespace IS_SOMIOD
             }
             btnSemaforo.UseVisualStyleBackColor = false;
             btnSemaforo.BackColor = FreeColor;
+        }
+
+        private async Task<bool> ApplicationExistsAsync(string appName)
+        {
+            var client = new RestClient(API_BASE);
+            var req = new RestRequest(appName, Method.Get);
+
+            try
+            {
+                var resp = await client.ExecuteAsync(req);
+                return resp.StatusCode == System.Net.HttpStatusCode.OK;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // ----------------------------------------------------
