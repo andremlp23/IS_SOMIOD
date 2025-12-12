@@ -24,6 +24,7 @@
             this.lblSemaforo = new System.Windows.Forms.Label();
             this.lblEsperaY = new System.Windows.Forms.Label();
             this.lblVagasX = new System.Windows.Forms.Label();
+            this.btnLuzes = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // label1
@@ -79,11 +80,21 @@
             this.lblVagasX.Text = "Vagas Descargas: 0";
             this.lblVagasX.Click += new System.EventHandler(this.lblVagasX_Click);
             // 
+            // btnLuzes
+            // 
+            this.btnLuzes.Location = new System.Drawing.Point(72, 325);
+            this.btnLuzes.Name = "btnLuzes";
+            this.btnLuzes.Size = new System.Drawing.Size(84, 29);
+            this.btnLuzes.TabIndex = 10;
+            this.btnLuzes.UseVisualStyleBackColor = true;
+            this.btnLuzes.Click += new System.EventHandler(this.btnLuzes_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1165, 625);
+            this.Controls.Add(this.btnLuzes);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.txtLog);
             this.Controls.Add(this.lblSemaforo);
@@ -105,5 +116,6 @@
         private System.Windows.Forms.Label lblSemaforo;
         private System.Windows.Forms.Label lblEsperaY;
         private System.Windows.Forms.Label lblVagasX;
+        private System.Windows.Forms.Button btnLuzes;
     }
 }

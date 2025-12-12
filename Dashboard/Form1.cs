@@ -171,8 +171,8 @@ namespace IS_SOMIOD
         // ---------------------------------------------------------
         private void UpdateLabels()
         {
-            lblVagasX.Text = $"Zona X (Descarga): {_countZonaX} Ocupadas";
-            lblEsperaY.Text = $"Zona Y (Saída): {_countZonaY} em Espera";
+            lblVagasX.Text = $"Zona X (Espera): {_countZonaX} em espera";
+            lblEsperaY.Text = $"Zona Y (Descarga): {_countZonaY} ocupados";
         }
 
         private void InvokeLog(string msg)
@@ -192,6 +192,11 @@ namespace IS_SOMIOD
         private void txtLog_TextChanged(object sender, EventArgs e) { }
 
         private void lblVagasX_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnLuzes_Click(object sender, EventArgs e)
         {
 
         }

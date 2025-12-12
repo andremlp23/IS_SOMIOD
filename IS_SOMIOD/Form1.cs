@@ -24,7 +24,9 @@ namespace IS_SOMIOD
         private IMqttClient mqttClient;
         private const string MQTT_BROKER = "127.0.0.1";
         private const int MQTT_PORT = 1883;
-        private const string MQTT_TOPIC_SEMAFORO = "api/somiod/smart-dock/semaforo";
+
+        // [ALTERAÇÃO] Mudamos para Wildcard '#' para ouvir semáforo, zona-x e zona-y
+        private const string MQTT_TOPIC_ALL = "api/somiod/smart-dock/#";
 
         // UI Arrays
         private Button[] zonaXSlots;
@@ -32,6 +34,7 @@ namespace IS_SOMIOD
 
         private readonly Color FreeColor = Color.LightGreen;
         private readonly Color OccupiedColor = Color.IndianRed;
+
 
         public Form1()
         {
@@ -61,6 +64,12 @@ namespace IS_SOMIOD
             {
                 // Só cria se NÃO existir
                 await BootstrapAsync();
+            }
+            else
+            {
+                // Mesmo que exista, garantimos que as subscrições estão lá 
+                // (opcional, mas bom para garantir que ouvimos zona-x e zona-y)
+                await EnsureSubscriptionsExist();
             }
 
             // Em ambos os casos (existe ou acabou de criar)
@@ -109,17 +118,27 @@ namespace IS_SOMIOD
             await CreateResource("container", APP_NAME, "zona-x");
             await CreateResource("container", APP_NAME, "zona-y");
             await CreateResource("container", APP_NAME, "semaforo");
+            await CreateResource("container", APP_NAME, "luzes");
 
-       
-            // O endpoint deve apontar para o broker MQTT local
-            await CreateSubscription("semaforo", "sub-app-main", $"mqtt://{MQTT_BROKER}:{MQTT_PORT}", 1);
+            await EnsureSubscriptionsExist();
+        }
+
+        private async Task EnsureSubscriptionsExist()
+        {
+            string endpoint = $"mqtt://{MQTT_BROKER}:{MQTT_PORT}";
+
+            // [ALTERAÇÃO] Criamos subscrições para TUDO, para podermos contar a lógica no cliente
+            await CreateSubscription("semaforo", "sub-client1-semaforo", endpoint, 1);
+            await CreateSubscription("zona-x", "sub-client1-zonax", endpoint, 1);
+            await CreateSubscription("zona-y", "sub-client1-zonay", endpoint, 1);
+            await CreateSubscription("luzes", "sub-client1-luzes", endpoint, 1);
+
         }
 
         // Helper genérico para criar recursos
         private async Task CreateResource(string type, string parentPath, string name, string subEndpoint = null, int evt = 1)
         {
             var client = new RestClient(API_BASE);
-            // Define o path do POST (Parent)
             string resourcePath = type == "application" ? "" : parentPath;
             var req = new RestRequest(resourcePath, Method.Post);
 
@@ -140,7 +159,6 @@ namespace IS_SOMIOD
             try
             {
                 var resp = await client.ExecuteAsync(req);
-                // 409 Conflict é aceitável (já existe)
                 if (!resp.IsSuccessful && resp.StatusCode != System.Net.HttpStatusCode.Conflict)
                     System.Diagnostics.Debug.WriteLine($"Error creating {name}: {resp.Content}");
             }
@@ -149,7 +167,6 @@ namespace IS_SOMIOD
 
         private async Task CreateSubscription(string container, string name, string endpoint, int evt)
         {
-            // O URL para criar subscription é .../App/Container
             await CreateResource("subscription", $"{APP_NAME}/{container}", name, endpoint, evt);
         }
 
@@ -177,7 +194,6 @@ namespace IS_SOMIOD
         private async Task DeleteFromContainerAsync(string container, string resourceName)
         {
             var client = new RestClient(API_BASE);
-            // URL: .../App/Container/ResourceName
             var req = new RestRequest($"{APP_NAME}/{container}/{resourceName}", Method.Delete);
             await client.ExecuteAsync(req);
         }
@@ -196,38 +212,48 @@ namespace IS_SOMIOD
 
             mqttClient.UseConnectedHandler(async e =>
             {
+                // [ALTERAÇÃO] Subscreve ao tópico Wildcard (#) para receber tudo
                 await mqttClient.SubscribeAsync(new MQTTnet.Client.Subscribing.MqttClientSubscribeOptionsBuilder()
-                    .WithTopicFilter(MQTT_TOPIC_SEMAFORO)
+                    .WithTopicFilter(MQTT_TOPIC_ALL)
                     .Build());
             });
 
             mqttClient.UseApplicationMessageReceivedHandler(e =>
             {
                 string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                // Payload agora é XML: <Notification><Content>...</Content></Notification>
 
                 try
                 {
                     XDocument doc = XDocument.Parse(payload);
-                    // Buscar o valor dentro de <Content>
-                    string contentVal = doc.Root.Element("Content")?.Value;
 
-                    // O conteúdo pode ser ele próprio um XML como <cmd>VERDE</cmd> ou texto simples
-                    if (!string.IsNullOrEmpty(contentVal))
+                    // Extrair dados do XML
+                    string container = doc.Root.Element("Container")?.Value;
+                    string content = doc.Root.Element("Content")?.Value;
+                    string eventType = doc.Root.Element("Event")?.Value;
+
+                    if (eventType != "Creation") return;
+
+
+                    switch (container)
                     {
-                        if (contentVal.Contains("VERDE"))
-                        {
-                            this.BeginInvoke(new Action(async () => {
-                                SetSemaphoreColor(Color.LightGreen);
-                                await MoveOneTruckAsync();
-                            }));
-                        }
-                        else if (contentVal.Contains("VERMELHO"))
-                        {
-                            this.BeginInvoke(new Action(() => SetSemaphoreColor(Color.IndianRed)));
-                        }
+                        case "semaforo":
+                            if (!string.IsNullOrEmpty(content))
+                            {
+                                if (content.Contains("VERDE"))
+                                {
+                                    this.BeginInvoke(new Action(async () => {
+                                        SetSemaphoreColor(Color.LightGreen);
+                                        await MoveOneTruckAsync();
+                                    }));
+                                }
+                                else if (content.Contains("VERMELHO"))
+                                {
+                                    this.BeginInvoke(new Action(() => SetSemaphoreColor(Color.IndianRed)));
+                                }
+                            }
+                            break;
                     }
-                }
+                     }
                 catch
                 {
                     System.Diagnostics.Debug.WriteLine("Erro ao parsear XML MQTT: " + payload);
@@ -251,9 +277,10 @@ namespace IS_SOMIOD
                 if (slot == null) return;
 
                 slot.BackColor = OccupiedColor;
+
+                // Envia dados para a API -> API envia MQTT -> Recebemos MQTT -> Switch case atualiza _countZonaX
                 await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
 
-                // [CORREÇÃO] force: true (Porque fui eu que cliquei, quero que executes!)
                 CheckAndUpdateSemaforo(force: true);
             }
             finally
@@ -266,7 +293,7 @@ namespace IS_SOMIOD
         private async void btnMenos1_Click(object sender, EventArgs e)
         {
             var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
-            if (slot == null) return; 
+            if (slot == null) return;
 
             slot.BackColor = FreeColor;
 
@@ -278,6 +305,7 @@ namespace IS_SOMIOD
         // Movimento Automático (X -> Y) quando Verde
         private async Task MoveOneTruckAsync()
         {
+
             var truckX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
             var freeY = zonaYSlots.FirstOrDefault(b => b.BackColor == FreeColor);
 
@@ -289,7 +317,7 @@ namespace IS_SOMIOD
 
                 await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
 
-                CheckAndUpdateSemaforo(force:false);
+                CheckAndUpdateSemaforo(force: false);
             }
         }
 
@@ -314,6 +342,11 @@ namespace IS_SOMIOD
         private void SetSemaphoreColor(Color c)
         {
             btnSemaforo.BackColor = c;
+        }
+
+        private void btnMais1_Click_1(object sender, EventArgs e)
+        {
+
         }
     }
 }
