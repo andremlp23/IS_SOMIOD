@@ -86,5 +86,11 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SOMIOD_Common\SOMIOD_Common.csproj">
+      <Project>{948c8bbf-8fc6-45fc-9ef0-676db587a7e1}</Project>
+      <Name>SOMIOD_Common</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
