@@ -4,8 +4,15 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data.SqlClient;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Web.Http;
+
+// [MQTT] Imports Adicionados
+using System.Threading;
+using System.Threading.Tasks;
+using System.Xml.Linq;
+using MQTTnet;
+using MQTTnet.Client;
+using MQTTnet.Client.Options;
 
 namespace SOMIOD_API.Controllers
 {
@@ -49,8 +56,6 @@ namespace SOMIOD_API.Controllers
             {
                 cmd.Parameters.AddWithValue("@Name", name);
 
-                // Dados retornados pelo SELECT
-                // Nota: A execução acontece AQUI dentro da lambda
                 using (SqlDataReader reader = cmd.ExecuteReader())
                 {
                     if (reader.Read())
@@ -117,7 +122,6 @@ namespace SOMIOD_API.Controllers
             if (IsDiscoveryRequest("container"))
             {
                 var containers = new List<string>();
-                // Path: /api/somiod/{appName}/{containerName}
                 string sqlDisc = @"
                     SELECT C.Name AS ContainerName, A.Name AS AppName
                     FROM Container C
@@ -215,7 +219,6 @@ namespace SOMIOD_API.Controllers
         public IHttpActionResult GetApplication(string appName)
         {
             // --- DISCOVERY ---
-            // Verifica se há header de discovery
             string discoveryType = GetDiscoveryType();
 
             if (!string.IsNullOrEmpty(discoveryType))
@@ -223,27 +226,22 @@ namespace SOMIOD_API.Controllers
                 var resources = new List<string>();
                 string sqlDisc = "";
 
-                // Discovery de CONTENTORES (Filhos diretos)
                 if (discoveryType == "container")
                 {
                     sqlDisc = @"SELECT C.Name FROM Container C 
                                 JOIN Application A ON C.ParentAppId = A.Id 
                                 WHERE A.Name = @AppName";
                 }
-                // Discovery de CONTENT-INSTANCES (Recursivo: Netos)
                 else if (discoveryType == "content-instance")
                 {
-                    // Seleciona ContentInstances cujos Contentores pais pertencem à App
                     sqlDisc = @"SELECT CI.Name, C.Name as ContainerName 
                                 FROM ContentInstance CI
                                 JOIN Container C ON CI.ParentContainerId = C.Id
                                 JOIN Application A ON C.ParentAppId = A.Id
                                 WHERE A.Name = @AppName";
                 }
-                // Discovery de SUBSCRIPTIONS (Recursivo: Netos)
                 else if (discoveryType == "subscription")
                 {
-                    // Seleciona Subscriptions cujos Contentores pais pertencem à App
                     sqlDisc = @"SELECT S.Name, C.Name as ContainerName
                                 FROM Subscription S
                                 JOIN Container C ON S.ParentContainerId = C.Id
@@ -252,7 +250,6 @@ namespace SOMIOD_API.Controllers
                 }
                 else
                 {
-                    // Tipo de discovery não suportado neste nível
                     return BadRequest("Tipo de discovery inválido para nível de Aplicação.");
                 }
 
@@ -274,13 +271,11 @@ namespace SOMIOD_API.Controllers
                                 }
                                 else if (discoveryType == "content-instance")
                                 {
-                                    // Path: /api/somiod/{appName}/{containerName}/{instanceName}
                                     string contName = reader["ContainerName"].ToString();
                                     resources.Add($"/api/somiod/{appName}/{contName}/{resName}");
                                 }
                                 else if (discoveryType == "subscription")
                                 {
-                                    // Path: /api/somiod/{appName}/{containerName}/subs/{subName}
                                     string contName = reader["ContainerName"].ToString();
                                     resources.Add($"/api/somiod/{appName}/{contName}/subs/{resName}");
                                 }
@@ -363,10 +358,9 @@ namespace SOMIOD_API.Controllers
                 string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
                 container.ResourceName = "cont-" + timestamp;
             }
-                
+
             string finalName = container.ResourceName;
 
-            // INSERT e depois SELECT para obter o registo completo
             string sql = @"INSERT INTO Container (Name, ParentAppId) VALUES (@Name, @ParentId);
                            SELECT Id, Name, CreationDate, ParentAppId FROM Container WHERE Id = SCOPE_IDENTITY();";
 
@@ -377,7 +371,6 @@ namespace SOMIOD_API.Controllers
                 cmd.Parameters.AddWithValue("@Name", name);
                 cmd.Parameters.AddWithValue("@ParentId", appId);
 
-                // Dados retornados pelo SELECT
                 using (SqlDataReader reader = cmd.ExecuteReader())
                 {
                     if (reader.Read())
@@ -403,7 +396,6 @@ namespace SOMIOD_API.Controllers
         [Route("{appName}/{containerName}")]
         public IHttpActionResult GetContainer(string appName, string containerName)
         {
-            // Discovery de filhos (Pode ser 'content-instance' ou 'subscription')
             string discoveryType = GetDiscoveryType();
 
             if (discoveryType == "content-instance" || discoveryType == "subscription")
@@ -441,7 +433,6 @@ namespace SOMIOD_API.Controllers
                                 {
                                     string name = reader["Name"].ToString();
 
-                                    // Constrói o URL correto consoante o tipo
                                     if (discoveryType == "subscription")
                                         children.Add($"/api/somiod/{appName}/{containerName}/subs/{name}");
                                     else
@@ -471,6 +462,7 @@ namespace SOMIOD_API.Controllers
                 {
                     cmd.Parameters.AddWithValue("@AppName", appName);
                     cmd.Parameters.AddWithValue("@ContName", containerName);
+
                     using (SqlDataReader reader = cmd.ExecuteReader())
                     {
                         if (reader.Read())
@@ -536,11 +528,12 @@ namespace SOMIOD_API.Controllers
                 if (string.IsNullOrEmpty(instance.Content) || string.IsNullOrEmpty(instance.ContentType))
                     return BadRequest("Content e ContentType obrigatórios.");
 
-                if (string.IsNullOrEmpty(instance.ResourceName)){
+                if (string.IsNullOrEmpty(instance.ResourceName))
+                {
                     string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
                     instance.ResourceName = "ci-" + timestamp;
                 }
-                    
+
                 string finalName = instance.ResourceName;
 
                 string sql = @"INSERT INTO ContentInstance (Name, Content, ContentType, ParentContainerId) VALUES (@Name, @Content, @Type, @ParentId);
@@ -573,6 +566,9 @@ namespace SOMIOD_API.Controllers
                 if (!inserted) return InternalServerError();
                 if (createdInstance == null) return InternalServerError();
 
+                // [MQTT] Dispara notificação de Evento 1 (Criação) para o Broker
+                NotifySubscribers((int)contId, appName, containerName, createdInstance.ResourceName, createdInstance.Content, 1);
+
                 return Ok(createdInstance);
             }
             else if (resType == "subscription")
@@ -586,7 +582,6 @@ namespace SOMIOD_API.Controllers
                     string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
                     sub.ResourceName = "sub-" + timestamp;
                 }
-                    
 
                 string finalName = sub.ResourceName;
 
@@ -631,7 +626,9 @@ namespace SOMIOD_API.Controllers
         [Route("{appName}/{containerName}/{resourceName}")]
         public IHttpActionResult DeleteContentInstance(string appName, string containerName, string resourceName)
         {
-            // TODO: Antes de apagar, verificar subscrições (Event Deletion = 2) e notificar
+            // [MQTT] Precisamos do ID do contentor para buscar subscrições
+            int? contId = GetContainerIdByName(appName, containerName);
+            // Se contId for null, o DELETE em baixo falharia de qualquer forma ou daria 0 rows
 
             string sql = @"DELETE R FROM ContentInstance R
                            JOIN Container C ON R.ParentContainerId = C.Id
@@ -651,8 +648,14 @@ namespace SOMIOD_API.Controllers
                 }
             }
 
-            if (rows == 0) return NotFound();
-            return Ok($"ContentInstance '{resourceName}' apagada.");
+            // [MQTT] Se apagou algo com sucesso, notifica Evento 2 (Deletion)
+            if (rows > 0 && contId != null)
+            {
+                NotifySubscribers((int)contId, appName, containerName, resourceName, "DELETED", 2);
+                return Ok($"ContentInstance '{resourceName}' apagada.");
+            }
+
+            return NotFound();
         }
 
         // GET ContentInstance
