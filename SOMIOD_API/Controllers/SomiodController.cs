@@ -860,5 +860,80 @@ namespace SOMIOD_API.Controllers
             }
             return null;
         }
+
+        // [MQTT] Responsável por encontrar subscritores e montar o XML de notificação
+        private void NotifySubscribers(int containerId, string appName, string containerName, string resourceName, string contentVal, int eventType)
+        {
+            var endpoints = new List<string>();
+            using (SqlConnection conn = new SqlConnection(connectionString))
+            {
+                conn.Open();
+
+                // Usa DISTINCT para evitar mensagens duplicadas
+                string sql = "SELECT DISTINCT Endpoint FROM Subscription WHERE ParentContainerId = @ParentId AND EventId = @Evt";
+
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ParentId", containerId);
+                cmd.Parameters.AddWithValue("@Evt", eventType);
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read()) endpoints.Add(reader["Endpoint"].ToString());
+                }
+            }
+
+            if (endpoints.Count == 0) return;
+
+            // Cria o XML de Notificação
+            XElement xmlMsg = new XElement("Notification",
+                new XElement("Event", eventType == 1 ? "Creation" : "Deletion"),
+                new XElement("Resource", resourceName),
+                new XElement("Container", containerName),
+                new XElement("App", appName),
+                new XElement("Content", contentVal ?? "")
+            );
+            string payload = xmlMsg.ToString();
+            string topic = $"api/somiod/{appName}/{containerName}";
+
+            foreach (var ep in endpoints)
+            {
+                if (ep.ToLower().StartsWith("mqtt://"))
+                {
+                    try
+                    {
+                        var uri = new Uri(ep);
+                        string brokerIp = uri.Host;
+                        int port = uri.Port > 0 ? uri.Port : 1883;
+
+                        Task.Run(async () => await PublishMqttAsync(brokerIp, port, topic, payload));
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        // [MQTT] Responsável pela conexão e publicação assíncrona no Broker
+        private async Task PublishMqttAsync(string ip, int port, string topic, string payload)
+        {
+            try
+            {
+                var factory = new MqttFactory();
+                using (var mqttClient = factory.CreateMqttClient())
+                {
+                    var options = new MqttClientOptionsBuilder()
+                        .WithTcpServer(ip, port)
+                        .WithClientId("SOMIOD_Server_" + Guid.NewGuid())
+                        .Build();
+                    await mqttClient.ConnectAsync(options, CancellationToken.None);
+                    var msg = new MqttApplicationMessageBuilder()
+                        .WithTopic(topic)
+                        .WithPayload(payload)
+                        .WithExactlyOnceQoS()
+                        .Build();
+                    await mqttClient.PublishAsync(msg, CancellationToken.None);
+                    await mqttClient.DisconnectAsync();
+                }
+            }
+            catch { }
+        }
     }
 }

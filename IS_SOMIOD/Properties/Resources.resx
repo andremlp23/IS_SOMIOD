@@ -124,4 +124,7 @@
   <data name="traffic-light" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\traffic-light.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
+  <data name="box-truck" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\box-truck.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
 </root>
