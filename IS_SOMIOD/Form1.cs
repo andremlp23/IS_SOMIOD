@@ -5,22 +5,17 @@ using System.Drawing;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using SOMIOD_Common; // Certifica-te que tens a referência adicionada ao projeto
+using SOMIOD_Common;
 
 namespace IS_SOMIOD
 {
     public partial class Form1 : Form
     {
-        // A nossa biblioteca
         private SomiodMqttHelper _mqttHelper;
-
         private const string API_BASE = "http://localhost:62056/api/somiod";
         private const string APP_NAME = "smart-parking";
-
-        // Tópicos específicos (ou Wildcard se preferires receber tudo)
         private const string MQTT_TOPIC_ALL = "api/somiod/smart-parking/#";
 
-        // UI Arrays
         private Button[] zonaXSlots;
         private Button[] zonaYSlots;
         private readonly Color FreeColor = Color.LightGreen;
@@ -30,14 +25,14 @@ namespace IS_SOMIOD
         private int _countZonaX = 0;
         private int _countZonaY = 0;
 
+        //Variável que evita ações concorrentes
+        private bool _systemBusy = false;
+
         public Form1()
         {
             InitializeComponent();
-
-            // Instancia o Helper da DLL partilhada
             _mqttHelper = new SomiodMqttHelper("127.0.0.1", 1883);
 
-            // Liga eventos de botão (caso não estejam no designer)
             this.btnMais1.Click += btnMais1_Click;
             this.btnMenos1.Click += btnMenos1_Click;
 
@@ -53,25 +48,17 @@ namespace IS_SOMIOD
         private async void Form1_Load(object sender, EventArgs e)
         {
             InitializeDefaultColors();
-
             bool exists = await ApplicationExistsAsync(APP_NAME);
-            if (!exists)
-                await BootstrapAsync();
-            else
-                await EnsureSubscriptionsExist();
+            if (!exists) await BootstrapAsync();
+            else await EnsureSubscriptionsExist();
 
-            // Configura e conecta o MQTT
             _mqttHelper.OnMessageReceived += HandleMqttMessage;
-
             try
             {
                 await _mqttHelper.ConnectAsync("Controller");
                 await _mqttHelper.SubscribeAsync(MQTT_TOPIC_ALL);
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Erro ao conectar MQTT: " + ex.Message);
-            }
+            catch (Exception ex) { MessageBox.Show("Erro MQTT: " + ex.Message); }
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -80,7 +67,7 @@ namespace IS_SOMIOD
         }
 
         // ==========================================================
-        //  LÓGICA MQTT (Receção)
+        //  LÓGICA MQTT
         // ==========================================================
         private void HandleMqttMessage(string topic, string container, string content, string eventType)
         {
@@ -91,18 +78,15 @@ namespace IS_SOMIOD
                 switch (container)
                 {
                     case "semaforo":
-                        if (!string.IsNullOrEmpty(content))
+                        if (!string.IsNullOrEmpty(content) && content.Contains("VERDE"))
                         {
-                            if (content.Contains("VERDE"))
-                            {
-                                SetSemaphoreColor(Color.LightGreen);
-                                // Dispara movimento automático
-                                Task.Run(() => MoveOneTruckAsync());
-                            }
-                            else if (content.Contains("VERMELHO"))
-                            {
-                                SetSemaphoreColor(Color.IndianRed);
-                            }
+                            SetSemaphoreColor(Color.LightGreen);
+                            // Tenta mover o camião automaticamente
+                            Task.Run(() => MoveOneTruckAsync());
+                        }
+                        else if (content.Contains("VERMELHO"))
+                        {
+                            SetSemaphoreColor(Color.IndianRed);
                         }
                         break;
 
@@ -119,10 +103,10 @@ namespace IS_SOMIOD
                         }
                         break;
 
+                    // Contadores apenas para debug/log visual se necessário
                     case "zona-x":
                         if (content.Contains("CAMIAO-IN")) _countZonaX++;
                         break;
-
                     case "zona-y":
                         if (content.Contains("MOVIDO")) { _countZonaX--; _countZonaY++; }
                         else if (content.Contains("saiu")) _countZonaY--;
@@ -132,71 +116,111 @@ namespace IS_SOMIOD
         }
 
         // ==========================================================
-        //  LÓGICA DE NEGÓCIO (Movimento & API)
+        //  LÓGICA DE NEGÓCIO (Protegida contra Spam)
         // ==========================================================
 
         private async void btnMais1_Click(object sender, EventArgs e)
         {
-            btnMais1.Enabled = false;
+            // 1. Verificação inicial de bloqueio
+            if (_systemBusy) return;
+
             try
             {
-                var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
-                if (slot == null) return; // Cheio
+                _systemBusy = true; // Bloqueia o sistema
+                btnMais1.Enabled = false; // Bloqueia o botão visualmente
 
+                var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
+                if (slot == null) return;
+
+                // Atualiza visualmente JÁ (para o user ver que funcionou)
                 slot.BackColor = OccupiedColor;
-                slot.BackgroundImage = Properties.Resources.box_truck; // Certifica-te que tens a imagem nos Resources
+                slot.BackgroundImage = Properties.Resources.box_truck;
                 slot.BackgroundImageLayout = ImageLayout.Zoom;
 
+                // Faz a chamada lenta à API
                 await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
+
                 CheckAndUpdateSemaforo(force: true);
             }
             finally
             {
-                btnMais1.Enabled = true;
+                btnMais1.Enabled = true; 
+                _systemBusy = false;     
             }
         }
 
         private async void btnMenos1_Click(object sender, EventArgs e)
         {
-            var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
-            if (slot == null) return; // Vazio
+         
+            if (_systemBusy) return;
 
-            slot.BackColor = FreeColor;
-            slot.BackgroundImage = null;
+            try
+            {
+                _systemBusy = true; 
+                btnMenos1.Enabled = false; 
 
-            await SendDataAsync("zona-y", "saiu");
-            CheckAndUpdateSemaforo();
+                var slot = zonaYSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
+                if (slot == null) return;
+
+          
+                slot.BackColor = FreeColor;
+                slot.BackgroundImage = null;
+
+                // Chamada lenta
+                await SendDataAsync("zona-y", "saiu");
+
+                CheckAndUpdateSemaforo();
+            }
+            finally
+            {
+                btnMenos1.Enabled = true; 
+                _systemBusy = false;     
+            }
         }
 
         private async Task MoveOneTruckAsync()
         {
-            // Executar na UI thread se chamado de Task.Run
+            // Se já estivermos a fazer alguma coisa (Entrar, Sair ou Mover), aborta.
+            if (_systemBusy) return;
+
             if (this.InvokeRequired)
             {
                 this.Invoke(new Action(async () => await MoveOneTruckAsync()));
                 return;
             }
 
-            var truckX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
-            var freeY = zonaYSlots.FirstOrDefault(b => b.BackColor == FreeColor);
-
-            if (truckX != null && freeY != null)
+            try
             {
-                // Animação visual
-                truckX.BackColor = FreeColor;
-                truckX.BackgroundImage = null;
+                _systemBusy = true;
 
-                await Task.Delay(500);
+                var truckX = zonaXSlots.FirstOrDefault(b => b.BackColor == OccupiedColor);
+                var freeY = zonaYSlots.FirstOrDefault(b => b.BackColor == FreeColor);
 
-                freeY.BackColor = OccupiedColor;
-                freeY.BackgroundImage = Properties.Resources.box_truck;
-                freeY.BackgroundImageLayout = ImageLayout.Zoom;
+                if (truckX != null && freeY != null)
+                {
+                    // Animação visual
+                    truckX.BackColor = FreeColor;
+                    truckX.BackgroundImage = null;
 
-                // Notificar API
-                await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
+                    // Delay para simular viagem
+                    await Task.Delay(1000);
 
-                // Verificar estado (sem forçar, para evitar loops)
-                CheckAndUpdateSemaforo(force: false);
+                    freeY.BackColor = OccupiedColor;
+                    freeY.BackgroundImage = Properties.Resources.box_truck;
+                    freeY.BackgroundImageLayout = ImageLayout.Zoom;
+
+                    await SendDataAsync("zona-y", "<matricula>MOVIDO</matricula>");
+
+                    CheckAndUpdateSemaforo(force: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao mover camião: " + ex.Message);
+            }
+            finally
+            {
+                _systemBusy = false;
             }
         }
 
@@ -220,7 +244,6 @@ namespace IS_SOMIOD
         {
             var client = new RestClient(API_BASE);
             var req = new RestRequest($"{APP_NAME}/{container}", Method.Post);
-
             var body = new Dictionary<string, object>
             {
                 { "res-type", "content-instance" },
@@ -229,19 +252,11 @@ namespace IS_SOMIOD
                 { "content-type", "application/xml" }
             };
             req.AddJsonBody(body);
-
-            try
-            {
-                var resp = await client.ExecuteAsync(req);
-                return resp.IsSuccessful;
-            }
+            try { var resp = await client.ExecuteAsync(req); return resp.IsSuccessful; }
             catch { return false; }
         }
 
-        // ==========================================================
-        //  BOOTSTRAP & HELPERS
-        // ==========================================================
-
+        // Helpers de Bootstrap e Cores
         private void InitializeDefaultColors()
         {
             foreach (var b in zonaXSlots.Concat(zonaYSlots))
@@ -254,20 +269,13 @@ namespace IS_SOMIOD
             btnSemaforo.BackColor = FreeColor;
         }
 
-        private void SetSemaphoreColor(Color c)
-        {
-            btnSemaforo.BackColor = c;
-        }
+        private void SetSemaphoreColor(Color c) { btnSemaforo.BackColor = c; }
 
         private async Task<bool> ApplicationExistsAsync(string appName)
         {
             var client = new RestClient(API_BASE);
             var req = new RestRequest(appName, Method.Get);
-            try
-            {
-                var resp = await client.ExecuteAsync(req);
-                return resp.StatusCode == System.Net.HttpStatusCode.OK;
-            }
+            try { var resp = await client.ExecuteAsync(req); return resp.StatusCode == System.Net.HttpStatusCode.OK; }
             catch { return false; }
         }
 
@@ -278,7 +286,6 @@ namespace IS_SOMIOD
             await CreateResource("container", APP_NAME, "zona-y");
             await CreateResource("container", APP_NAME, "semaforo");
             await CreateResource("container", APP_NAME, "luzes");
-
             await EnsureSubscriptionsExist();
         }
 
@@ -296,19 +303,12 @@ namespace IS_SOMIOD
             var client = new RestClient(API_BASE);
             string resourcePath = type == "application" ? "" : parentPath;
             var req = new RestRequest(resourcePath, Method.Post);
-
             var body = new Dictionary<string, object>
             {
                 { "res-type", type },
                 { "resource-name", name }
             };
-
-            if (type == "subscription")
-            {
-                body.Add("endpoint", subEndpoint);
-                body.Add("evt", evt);
-            }
-
+            if (type == "subscription") { body.Add("endpoint", subEndpoint); body.Add("evt", evt); }
             req.AddJsonBody(body);
             try { await client.ExecuteAsync(req); } catch { }
         }
@@ -318,7 +318,6 @@ namespace IS_SOMIOD
             await CreateResource("subscription", $"{APP_NAME}/{container}", name, endpoint, evt);
         }
 
-        // Eventos vazios
         private void btnMais1_Click_1(object sender, EventArgs e) { }
     }
 }
