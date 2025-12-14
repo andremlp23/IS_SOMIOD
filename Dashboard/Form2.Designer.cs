@@ -19,6 +19,7 @@
 
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form2));
             this.label1 = new System.Windows.Forms.Label();
             this.ParkTextBox = new System.Windows.Forms.RichTextBox();
             this.lblSemaforo = new System.Windows.Forms.Label();
@@ -27,6 +28,7 @@
             this.btnLuzes = new System.Windows.Forms.Button();
             this.label2 = new System.Windows.Forms.Label();
             this.LuzesTextBox = new System.Windows.Forms.RichTextBox();
+            this.lblLuzesStatus = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // label1
@@ -84,9 +86,9 @@
             // 
             // btnLuzes
             // 
-            this.btnLuzes.Location = new System.Drawing.Point(72, 325);
+            this.btnLuzes.Location = new System.Drawing.Point(69, 349);
             this.btnLuzes.Name = "btnLuzes";
-            this.btnLuzes.Size = new System.Drawing.Size(111, 29);
+            this.btnLuzes.Size = new System.Drawing.Size(205, 109);
             this.btnLuzes.TabIndex = 10;
             this.btnLuzes.Text = "Desligar Luzes";
             this.btnLuzes.UseVisualStyleBackColor = true;
@@ -111,11 +113,20 @@
             this.LuzesTextBox.TabIndex = 11;
             this.LuzesTextBox.Text = "";
             // 
+            // lblLuzesStatus
+            // 
+            this.lblLuzesStatus.AutoSize = true;
+            this.lblLuzesStatus.Location = new System.Drawing.Point(197, 355);
+            this.lblLuzesStatus.Name = "lblLuzesStatus";
+            this.lblLuzesStatus.Size = new System.Drawing.Size(0, 16);
+            this.lblLuzesStatus.TabIndex = 13;
+            // 
             // Form2
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1165, 625);
+            this.Controls.Add(this.lblLuzesStatus);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.LuzesTextBox);
             this.Controls.Add(this.btnLuzes);
@@ -124,8 +135,9 @@
             this.Controls.Add(this.lblSemaforo);
             this.Controls.Add(this.lblEsperaY);
             this.Controls.Add(this.lblVagasX);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "Form2";
-            this.Text = "Dashboard (Form2)";
+            this.Text = "Dashboard";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form2_FormClosing);
             this.Load += new System.EventHandler(this.Form2_Load);
             this.ResumeLayout(false);
@@ -143,5 +155,6 @@
         private System.Windows.Forms.Button btnLuzes;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.RichTextBox LuzesTextBox;
+        private System.Windows.Forms.Label lblLuzesStatus;
     }
 }

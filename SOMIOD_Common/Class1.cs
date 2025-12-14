@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
-using uPLibrary.Networking.M2Mqtt;
 
 namespace SOMIOD_Common
 {
@@ -16,6 +15,9 @@ namespace SOMIOD_Common
         private MqttFactory _factory;
         private string _brokerIp;
         private int _brokerPort;
+
+        // [NOVO] Um cadeado para impedir conexões simultâneas (Thread-Safety)
+        private static readonly SemaphoreSlim _connectLock = new SemaphoreSlim(1, 1);
 
         public event Action<string, string, string, string> OnMessageReceived;
 
@@ -29,22 +31,38 @@ namespace SOMIOD_Common
 
         public async Task ConnectAsync(string clientIdSuffix)
         {
-            var options = new MqttClientOptionsBuilder()
-                .WithTcpServer(_brokerIp, _brokerPort)
-                .WithClientId($"SomiodClient_{clientIdSuffix}_{Guid.NewGuid()}")
-                .Build();
+            // 1. Espera a sua vez para entrar (Lock)
+            await _connectLock.WaitAsync();
 
-            // Configurar o handler de mensagens ANTES de conectar
-            _client.UseApplicationMessageReceivedHandler(e =>
+            try
             {
-                string topic = e.ApplicationMessage.Topic;
-                string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
-                ParseAndNotify(topic, payload);
-            });
+                // 2. Se já estiver conectado, não faz nada e sai
+                if (_client.IsConnected) return;
 
-            if (!_client.IsConnected)
-            {
+                var options = new MqttClientOptionsBuilder()
+                    .WithTcpServer(_brokerIp, _brokerPort)
+                    .WithClientId($"SomiodClient_{clientIdSuffix}_{Guid.NewGuid()}")
+                    .Build();
+
+                _client.UseApplicationMessageReceivedHandler(e =>
+                {
+                    string topic = e.ApplicationMessage.Topic;
+                    string payload = Encoding.UTF8.GetString(e.ApplicationMessage.Payload);
+                    ParseAndNotify(topic, payload);
+                });
+
+                // 3. Tenta conectar com segurança
                 await _client.ConnectAsync(options, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // Se der erro real, lançamos para a aplicação saber
+                throw ex;
+            }
+            finally
+            {
+                // 4. Liberta a porta para o próximo (Unlock)
+                _connectLock.Release();
             }
         }
 
@@ -68,7 +86,6 @@ namespace SOMIOD_Common
 
         public bool IsConnected => _client != null && _client.IsConnected;
 
-        // Lógica centralizada de parsing XML
         private void ParseAndNotify(string topic, string xmlPayload)
         {
             try
@@ -78,13 +95,11 @@ namespace SOMIOD_Common
                 string content = doc.Root.Element("Content")?.Value;
                 string eventType = doc.Root.Element("Event")?.Value;
 
-                // Só dispara o evento se alguém estiver à escuta
                 OnMessageReceived?.Invoke(topic, container, content, eventType);
             }
             catch
             {
-                // Ignora erros de parse ou logs se necessário
-                // Opcional: Criar evento OnError
+                // Ignora erros de XML malformado
             }
         }
     }

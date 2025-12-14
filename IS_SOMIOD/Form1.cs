@@ -11,14 +11,14 @@ namespace IS_SOMIOD
 {
     public partial class Form1 : Form
     {
-        // Helper da biblioteca comum
+        // A nossa biblioteca
         private SomiodMqttHelper _mqttHelper;
 
         private const string API_BASE = "http://localhost:62056/api/somiod";
-        private const string APP_NAME = "smart-dock";
+        private const string APP_NAME = "smart-parking";
 
         // Tópicos específicos (ou Wildcard se preferires receber tudo)
-        private const string MQTT_TOPIC_ALL = "api/somiod/smart-dock/#";
+        private const string MQTT_TOPIC_ALL = "api/somiod/smart-parking/#";
 
         // UI Arrays
         private Button[] zonaXSlots;
@@ -26,7 +26,7 @@ namespace IS_SOMIOD
         private readonly Color FreeColor = Color.LightGreen;
         private readonly Color OccupiedColor = Color.IndianRed;
 
-        // Estado local (opcional, mas útil para manter sincronia)
+        // Estado local
         private int _countZonaX = 0;
         private int _countZonaY = 0;
 
@@ -54,14 +54,13 @@ namespace IS_SOMIOD
         {
             InitializeDefaultColors();
 
-            // 1. Garante que a estrutura na API existe
             bool exists = await ApplicationExistsAsync(APP_NAME);
             if (!exists)
                 await BootstrapAsync();
             else
                 await EnsureSubscriptionsExist();
 
-            // 2. Configura e conecta o MQTT
+            // Configura e conecta o MQTT
             _mqttHelper.OnMessageReceived += HandleMqttMessage;
 
             try
@@ -77,7 +76,7 @@ namespace IS_SOMIOD
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            _mqttHelper.DisconnectAsync();
+            _mqttHelper.DisconnectAsync().Wait();
         }
 
         // ==========================================================

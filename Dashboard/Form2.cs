@@ -14,22 +14,23 @@ namespace IS_SOMIOD
         private SomiodMqttHelper _mqttHelper;
 
         private const string API_BASE = "http://localhost:62056/";
-        private const string APP_NAME = "smart-dock";
+        private const string APP_NAME = "smart-parking";
 
-        // Tópicos
-        private const string TOPIC_SEMAFORO = "api/somiod/smart-dock/semaforo";
-        private const string TOPIC_ZONA_X = "api/somiod/smart-dock/zona-x";
-        private const string TOPIC_ZONA_Y = "api/somiod/smart-dock/zona-y";
-        private const string TOPIC_LUZES = "api/somiod/smart-dock/luzes";
+        // Tópicos a que subscreve
+        private const string TOPIC_SEMAFORO = "api/somiod/smart-parking/semaforo";
+        private const string TOPIC_ZONA_X = "api/somiod/smart-parking/zona-x";
+        private const string TOPIC_ZONA_Y = "api/somiod/smart-parking/zona-y";
+        private const string TOPIC_LUZES = "api/somiod/smart-parking/luzes";
 
         private bool _lightsOn = true;
         private int _countZonaX = 0;
         private int _countZonaY = 0;
+        private const int MAX_CAPACITY = 4;
 
         public Form2()
         {
             InitializeComponent();
-            // Instancia o Helper
+            // Instanciar o Helper
             _mqttHelper = new SomiodMqttHelper("127.0.0.1", 1883);
         }
 
@@ -37,6 +38,10 @@ namespace IS_SOMIOD
         {
             UpdateLabels();
             lblSemaforo.BackColor = Color.Gray;
+            // --- ESTADO: LIGADO ---
+            btnLuzes.BackColor = Color.Yellow;
+            btnLuzes.ForeColor = Color.Black;
+            btnLuzes.Text = "💡 LUZES: LIGADAS\n(Clicar para Desligar)";
 
             // 1. Ouve o evento do Helper
             _mqttHelper.OnMessageReceived += HandleMqttMessage;
@@ -61,7 +66,7 @@ namespace IS_SOMIOD
 
         private void Form2_FormClosing(object sender, FormClosingEventArgs e)
         {
-            _mqttHelper.DisconnectAsync();
+            _mqttHelper.DisconnectAsync().Wait();
         }
 
         // Este método é chamado automaticamente pelo Helper quando chega uma mensagem válida
@@ -71,7 +76,7 @@ namespace IS_SOMIOD
 
             this.BeginInvoke(new Action(() =>
             {
-                // Roteamento para as TextBoxes
+                // Encamenhamento para as TextBoxes
                 if (topic == TOPIC_LUZES)
                     InvokeLog(LuzesTextBox, $"CMD: {content}");
                 else
@@ -92,16 +97,48 @@ namespace IS_SOMIOD
                     break;
 
                 case "zona-x":
-                    if (content.Contains("CAMIAO-IN")) _countZonaX++;
+                    if (content.Contains("CAMIAO-IN"))
+                    {
+                        if (_countZonaX < MAX_CAPACITY) _countZonaX++;
+                    }
                     break;
 
                 case "zona-y":
-                    if (content.Contains("MOVIDO")) { _countZonaX--; _countZonaY++; }
-                    else if (content.Contains("saiu") || content.Contains("SAIU")) { _countZonaY--; }
+                    if (content.Contains("MOVIDO"))
+                    {
+                        // MOVIMENTO DE X -> Y
+
+                        if (_countZonaX > 0) _countZonaX--;
+
+                        if (_countZonaY < MAX_CAPACITY) _countZonaY++;
+                    }
+                    else if (content.Contains("saiu") || content.Contains("SAIU"))
+                    {
+                        // SAÍDA DE Y
+                        if (_countZonaY > 0) _countZonaY--;
+                    }
                     break;
 
                 case "luzes":
-                    // Lógica visual para feedback do botão ou background se quisesses
+                    // Atualiza a variável de estado
+                    bool isNowOn = content.Contains("ON");
+                    _lightsOn = isNowOn; // Mantém a variável local sincronizada
+
+                    if (isNowOn)
+                    {
+                        // --- ESTADO: LIGADO ---
+                        btnLuzes.BackColor = Color.Yellow;
+                        btnLuzes.ForeColor = Color.Black;
+                        btnLuzes.Text = "💡 LUZES: LIGADAS\n(Clicar para Desligar)";
+                    }
+                    else
+                    {
+                        // --- ESTADO: DESLIGADO ---
+                        btnLuzes.BackColor = Color.FromArgb(64, 64, 64);
+                        btnLuzes.ForeColor = Color.White;
+                        btnLuzes.Text = "LUZES: DESLIGADAS\n(Clicar para Ligar)";
+                    }
+                    InvokeLog(LuzesTextBox, $"Estado Luzes: {(isNowOn ? "ON" : "OFF")}");
                     break;
             }
 
@@ -110,7 +147,7 @@ namespace IS_SOMIOD
             UpdateLabels();
         }
 
-        // --- UI & API Helpers (Mantêm-se iguais) ---
+        // --- UI & API Helpers ---
         private void UpdateLabels()
         {
             lblVagasX.Text = $"Zona X (Espera): {_countZonaX} em espera";
@@ -129,14 +166,11 @@ namespace IS_SOMIOD
             _lightsOn = !_lightsOn;
             string command = _lightsOn ? "ON" : "OFF";
 
-            // Exemplo de como usar a API (igual ao que tinhas)
             await SendCommandToApi("luzes", $"<cmd>{command}</cmd>");
         }
 
         private async Task<bool> SendCommandToApi(string container, string content)
         {
-            // (Código de envio HTTP mantém-se igual ao anterior, omitido para brevidade)
-            // ... Podes copiar o método SendCommandToApi do teu código anterior ...
             using (var client = new HttpClient())
             {
                 client.BaseAddress = new Uri(API_BASE);
