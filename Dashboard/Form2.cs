@@ -76,7 +76,6 @@ namespace IS_SOMIOD
 
             this.BeginInvoke(new Action(() =>
             {
-                // Encamenhamento para as TextBoxes
                 if (topic == TOPIC_LUZES)
                     InvokeLog(LuzesTextBox, $"CMD: {content}");
                 else

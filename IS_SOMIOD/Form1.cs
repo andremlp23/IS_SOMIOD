@@ -103,7 +103,6 @@ namespace IS_SOMIOD
                         }
                         break;
 
-                    // Contadores apenas para debug/log visual se necessário
                     case "zona-x":
                         if (content.Contains("CAMIAO-IN")) _countZonaX++;
                         break;
@@ -132,12 +131,10 @@ namespace IS_SOMIOD
                 var slot = zonaXSlots.FirstOrDefault(b => b.BackColor == FreeColor);
                 if (slot == null) return;
 
-                // Atualiza visualmente JÁ (para o user ver que funcionou)
                 slot.BackColor = OccupiedColor;
                 slot.BackgroundImage = Properties.Resources.box_truck;
                 slot.BackgroundImageLayout = ImageLayout.Zoom;
 
-                // Faz a chamada lenta à API
                 await SendDataAsync("zona-x", "<matricula>CAMIAO-IN</matricula>");
 
                 CheckAndUpdateSemaforo(force: true);
@@ -166,7 +163,6 @@ namespace IS_SOMIOD
                 slot.BackColor = FreeColor;
                 slot.BackgroundImage = null;
 
-                // Chamada lenta
                 await SendDataAsync("zona-y", "saiu");
 
                 CheckAndUpdateSemaforo();
@@ -180,7 +176,7 @@ namespace IS_SOMIOD
 
         private async Task MoveOneTruckAsync()
         {
-            // Se já estivermos a fazer alguma coisa (Entrar, Sair ou Mover), aborta.
+
             if (_systemBusy) return;
 
             if (this.InvokeRequired)
