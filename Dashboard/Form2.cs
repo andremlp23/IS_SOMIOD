@@ -188,5 +188,10 @@ namespace IS_SOMIOD
         private void lblEsperaY_Click(object sender, EventArgs e) { }
         private void txtLog_TextChanged(object sender, EventArgs e) { }
         private void lblVagasX_Click(object sender, EventArgs e) { }
+
+        private void LuzesTextBox_TextChanged(object sender, EventArgs e)
+        {
+
+        }
     }
 }
