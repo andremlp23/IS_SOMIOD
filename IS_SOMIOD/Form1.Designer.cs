@@ -185,7 +185,7 @@
             this.btnMais1.Size = new System.Drawing.Size(66, 62);
             this.btnMais1.TabIndex = 8;
             this.btnMais1.UseVisualStyleBackColor = true;
-            this.btnMais1.Click += new System.EventHandler(this.btnMais1_Click_1);
+            
             // 
             // Form1
             // 

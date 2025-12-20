@@ -1,4 +1,5 @@
 ﻿using SOMIOD_API.Models;
+using SOMIOD_API.DTOs;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -337,6 +338,43 @@ namespace SOMIOD_API.Controllers
             return Ok($"Aplicação '{appName}' e todos os seus filhos apagados.");
         }
 
+        // PATCH: api/somiod/{appName}
+        [HttpPatch]
+        [Route("{appName}")]
+        public IHttpActionResult UpdateApplicationName(string appName, [FromBody] RenameResourceDto body)
+        {
+            if (body == null)
+                return BadRequest("Body vazio");
+
+            if (string.IsNullOrWhiteSpace(body.ResourceName))
+                return BadRequest("Novo 'resource-name' inválido.");
+
+            string finalName = body.ResourceName;
+            bool updated = false;
+
+            string sql = @"UPDATE Application
+                   SET Name = @Name
+                   WHERE Name = @OldName";
+
+            bool success = ExecuteSqlWithRetry(sql, (cmd, name) =>
+            {
+                cmd.Parameters.AddWithValue("@Name", name);
+                cmd.Parameters.AddWithValue("@OldName", appName);
+
+                int rows = cmd.ExecuteNonQuery();
+                updated = rows > 0;
+            }, ref finalName);
+
+            if (!success)
+                return InternalServerError();
+
+            if (!updated)
+                return NotFound();
+
+            return Ok($"Aplicação '{appName}' renomeada para '{finalName}'.");
+        }
+
+
         // ===========================
         // 2. CONTENTORES (Containers)
         // ===========================
@@ -506,6 +544,47 @@ namespace SOMIOD_API.Controllers
             if (rows == 0) return NotFound();
             return Ok($"Contentor '{containerName}' apagado.");
         }
+
+        // PATCH: api/somiod/{appName}/{containerName}
+        [HttpPatch]
+        [Route("{appName}/{containerName}")]
+        public IHttpActionResult UpdateContainerName(string appName, string containerName, [FromBody] RenameResourceDto body)
+        {
+            if (body == null)
+                return BadRequest("Body vazio");
+
+            if (string.IsNullOrWhiteSpace(body.ResourceName))
+                return BadRequest("Novo 'resource-name' inválido.");
+
+            string finalName = body.ResourceName;
+            bool updated = false;
+
+            string sql = @"UPDATE C
+                   SET C.Name = @Name
+                   FROM Container C
+                   JOIN Application A ON C.ParentAppId = A.Id
+                   WHERE A.Name = @AppName AND C.Name = @OldName";
+
+            bool success = ExecuteSqlWithRetry(sql, (cmd, name) =>
+            {
+                cmd.Parameters.AddWithValue("@Name", name);
+                cmd.Parameters.AddWithValue("@OldName", containerName);
+                cmd.Parameters.AddWithValue("@AppName", appName);
+
+                int rows = cmd.ExecuteNonQuery();
+                updated = rows > 0;
+            }, ref finalName);
+
+            if (!success)
+                return InternalServerError();
+
+            if (!updated)
+                return NotFound();
+
+            return Ok($"Container '{containerName}' renomeado para '{finalName}'.");
+        }
+
+
 
         // ===========================================
         // 3. RECURSOS: ContentInstance & Subscription

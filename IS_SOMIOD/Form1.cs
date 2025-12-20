@@ -314,6 +314,6 @@ namespace IS_SOMIOD
             await CreateResource("subscription", $"{APP_NAME}/{container}", name, endpoint, evt);
         }
 
-        private void btnMais1_Click_1(object sender, EventArgs e) { }
+        
     }
 }
