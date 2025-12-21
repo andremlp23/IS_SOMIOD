@@ -338,13 +338,15 @@ namespace SOMIOD_API.Controllers
             return Ok($"Aplicação '{appName}' e todos os seus filhos apagados.");
         }
 
-        // PATCH: api/somiod/{appName}
-        [HttpPatch]
+        // PUT: api/somiod/{appName}
+        [HttpPut]
         [Route("{appName}")]
-        public IHttpActionResult UpdateApplicationName(string appName, [FromBody] RenameResourceDto body)
+        public IHttpActionResult UpdateApplicationName(
+            string appName,
+            [FromBody] RenameResourceDto body)
         {
             if (body == null)
-                return BadRequest("Body vazio");
+                return BadRequest("Body vazio.");
 
             if (string.IsNullOrWhiteSpace(body.ResourceName))
                 return BadRequest("Novo 'resource-name' inválido.");
@@ -371,8 +373,9 @@ namespace SOMIOD_API.Controllers
             if (!updated)
                 return NotFound();
 
-            return Ok($"Aplicação '{appName}' renomeada para '{finalName}'.");
+            return Ok($"Aplicação '{appName}' atualizada para '{finalName}' ");
         }
+
 
 
         // ===========================
@@ -545,13 +548,16 @@ namespace SOMIOD_API.Controllers
             return Ok($"Contentor '{containerName}' apagado.");
         }
 
-        // PATCH: api/somiod/{appName}/{containerName}
-        [HttpPatch]
+        // PUT: api/somiod/{appName}/{containerName}
+        [HttpPut]
         [Route("{appName}/{containerName}")]
-        public IHttpActionResult UpdateContainerName(string appName, string containerName, [FromBody] RenameResourceDto body)
+        public IHttpActionResult UpdateContainerName(
+            string appName,
+            string containerName,
+            [FromBody] RenameResourceDto body)
         {
             if (body == null)
-                return BadRequest("Body vazio");
+                return BadRequest("Body vazio.");
 
             if (string.IsNullOrWhiteSpace(body.ResourceName))
                 return BadRequest("Novo 'resource-name' inválido.");
@@ -581,8 +587,10 @@ namespace SOMIOD_API.Controllers
             if (!updated)
                 return NotFound();
 
-            return Ok($"Container '{containerName}' renomeado para '{finalName}'.");
+            // PUT success
+            return Ok($"Contentor '{containerName}' atualizada para '{finalName}' ");
         }
+
 
 
 
